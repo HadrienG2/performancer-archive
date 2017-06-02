@@ -31,6 +31,18 @@ The information within files or folders marked as "one-time" should not change
 over the course of a reasonable performance measurement, and should thus have
 an API which is optimized for single-shot readout (as opposed to sampling).
 
+[ ] **/proc/<pid>/clear_refs:** Write-only. May be used to estimate the memory
+    working set of a process by clearing various page accessed/dirty bits, with
+    the aim to check them again later on using e.g. "smaps".
+[ ] **/proc/<pid>/cmdline:** Process command line. May be used to map PIDs to
+    human-readable binary names.
+[ ] **/proc/<pid>/comm:** Very short (15 bytes + NULL) version of a process'
+    binary name. Would be redundant with cmdline if it weren't for the fact that
+    this mechanism can also be used to give threads a name.
+[ ] **/proc/<pid>/cpuset:** Readout of the process' CPU affinity configuration.
+    "/" means no affinity. For more information, see "man 7 cpuset".
+[ ] **/proc/<pid>/task/<tid>/comm:** Customizable thread identifier, follows
+    the same conventions as the process-wide "comm" and defaults to its value.
 [ ] **/proc/buddyinfo:** State of the buddy memory allocator, can hint towards
     RAM fragmentation issues
 [ ] **/proc/cmdline:** (one-time) Kernel command line, may be combined with
@@ -64,6 +76,13 @@ an API which is optimized for single-shot readout (as opposed to sampling).
 These files or folders have not been deemed sufficiently useful to performance
 studies in order to justify the cost of implementing a parser & API for them.
 
+* **/proc/<pid>/attr:** Process security attributes, mostly used by SELinux.
+* **/proc/<pid>/autogroup:** Optional mechanism used by the CFS Linux kernel
+  scheduler to group related processes (e.g. make -j) together.
+* **/proc/<pid>/auxv:** Binary metadata used by the dynamic linker. Little of it
+  is interesting for performance analysis, and all of it can be found elsewhere.
+* **/proc/<pid>/cgroup:** Process-specific cgroup metadata. See also "cgroups".
+* **/proc/<pid>/coredump_filter:** Process core dump control.
 * **/proc/acpi/:** Most ACPI-related stuff has moved to sysfs, and on my PC
   this folder only tells which peripheral may wake up the system from sleep.
 * **/proc/cgroups:** While the process isolation brought by cgroups has the
