@@ -31,8 +31,25 @@ an API which is optimized for single-shot readout (as opposed to sampling).
     "/" means no affinity. For more information, see "man 7 cpuset".
 [ ] **/proc/<pid>/io:** Basic statistics on the IO activity of a process.
 [ ] **/proc/<pid>/limits:** Resource limits for a given process.
+[ ] **/proc/<pid>/sched:** Scheduling statistics for a given process.
+[ ] **/proc/<pid>/schedstat:** Process-specific version of some of the
+    load_balance statistics from /proc/schedstat. See
+    http://eaglet.rain.com/rick/linux/schedstat/v15/format-15.html
+[ ] **/proc/<pid>/smaps:** Detailed statistics about a the memory usage of a
+    process' virtual memory regions. See also maps, numa_maps.
+[ ] **/proc/<pid>/stat:** A huge bunch of very diverse information, ranging from
+    CPU occupancy to the active instruction pointer. Should probably be
+    interfaced first.
+[ ] **/proc/<pid>/statm:** Some data on a process' overall memory consumption.
+[ ] **/proc/<pid>/status:** Historically meant as a human-readable variant of
+    stat and statm, but might have grown new fields since.
+[ ] **/proc/<pid>/task/<tid>:** Information about a given thread ("task").
+    Also duplicates some process-global info. Good luck figuring out what is
+    thread-specific and what is process-wide...
 [ ] **/proc/<pid>/task/<tid>/comm:** Customizable thread identifier, follows
     the same conventions as the process-wide "comm" and defaults to its value.
+[ ] **/proc/<pid>/timers:** Process-specific UNIX timer usager information.
+    Related to the system-wide /proc/timers.
 [ ] **/proc/buddyinfo:** State of the buddy memory allocator, can hint towards
     RAM fragmentation issues
 [ ] **/proc/cmdline:** (one-time) Kernel command line, may be combined with
@@ -43,6 +60,7 @@ an API which is optimized for single-shot readout (as opposed to sampling).
 [ ] **/proc/interrupts:** Hardware CPU interrupt counters.
 [ ] **/proc/locks:** POSIX file locks, may help nail down IO scalability issues.
 [ ] **/proc/meminfo:** Detailed RAM usage statistics.
+[ ] **/proc/net:** Basically a symlink to /proc/self/net.
 [ ] **/proc/pagetypeinfo:** More detailed variant of /proc/buddyinfo.
 [ ] **/proc/schedstat:** Kernel scheduler usage statistics, see also
     Documentation/scheduler/sched-stats.txt in kernel source tree.
@@ -85,8 +103,10 @@ studies in order to justify the cost of implementing a parser & API for them.
   gained access to the system with.
 * **/proc/<pid>/make-it-fail:** Part of the kernel's fault injection system.
 * **/proc/<pid>/map_files:** Memory-mapped files and their vmem location.
-* **/proc/<pid>/maps:** Map of some process' virtual memory.
+* **/proc/<pid>/maps:** Map of a process' virtual memory allocations.
 * **/proc/<pid>/mem:** Raw access to a process' virtual address space.
+* **/proc/<pid>/net:** Network configuration and statistics for the active
+  process' networking namespace.
 * **/proc/<pid>/mountinfo:** Mount points accessible to this process.
 * **/proc/<pid>/mounts:** An older (Linux 2.4) version of the same thing.
 * **/proc/<pid>/mountstats:** More metadata about mount points.
@@ -98,6 +118,21 @@ studies in order to justify the cost of implementing a parser & API for them.
 * **/proc/<pid>/oom_score:** Odds of being killed by the OOM killer.
 * **/proc/<pid>/oom_score_adj:** Current (as of Linux 2.6) variant of oom_adj.
 * **/proc/<pid>/pagemap:** Kernel page table for this process.
+* **/proc/<pid>/personality:** Process-specific UNIX compatibility settings.
+* **/proc/<pid>/projid_map:** Project ID, used by some filesystems like XFS.
+* **/proc/<pid>/root:** Root of this process' filesystem, as set by chroot.
+* **/proc/<pid>/sessionid:** Numerical identifier of the terminal session that
+  spawned this process.
+* **/proc/<pid>/setgroups:** Permission to change a process' group membership.
+* **/proc/<pid>/stack:** Symbolic trace of a process' kernel stack.
+* **/proc/<pid>/syscall:** Current system call being executed, and its args.
+* **/proc/<pid>/task/<tid>/children:** Space-separated list of task children.
+  Not reliable unless the process is frozen.
+* **/proc/<pid>/timerslack_ns:** Current process timer slack, used to save power
+  by grouping timer interrupts for different processes. Editable.
+* **/proc/<pid>/uid_map:** Like gid_map, but for user IDs.
+* **/proc/<pid>/wchan:** Symbolic name corresponding to a location in the kernel
+  where a process is sleeping.
 * **/proc/acpi/:** Most ACPI-related stuff has moved to sysfs, and on my PC
   this folder only tells which peripheral may wake up the system from sleep.
 * **/proc/cgroups:** While the process isolation brought by cgroups has the
@@ -126,10 +161,13 @@ studies in order to justify the cost of implementing a parser & API for them.
   on the amount of running processes and conflating CPU utilization with IO
   wait. Should not be used in serious performance studies.
 * **/proc/modules:** List and basic properties of loaded kernel modules.
+* **/proc/mounts:** Just a mirror of /proc/self/mounts (backwards compatible).
 * **/proc/mtrr:** Physical RAM bus caching settings, as set by the CPU's memory
   type range registers. Intel-specific.
+* **/proc/self:** Symlink to PID-specific info for the active process.
 * **/proc/sysrq-trigger:** Procfs-based equivalent of the Magic SysRq requests.
   Blunt and violent tools, only suitable for rough kernel debugging.
+* **/proc/thread-self:** Symlink to thread-specific info for the active thread.
 * **/proc/tty:** Low-level metadata on virtual consoles and serial ports.
 * **/proc/vmallocinfo:** Root-only. Detailed map of virtual memory allocations.
 
