@@ -31,6 +31,14 @@ an API which is optimized for single-shot readout (as opposed to sampling).
     "/" means no affinity. For more information, see "man 7 cpuset".
 [ ] **/proc/<pid>/io:** Basic statistics on the IO activity of a process.
 [ ] **/proc/<pid>/limits:** Resource limits for a given process.
+[ ] **/proc/<pid>/net:** Network configuration and statistics for the active
+    process' networking namespace. Not fully interfaced.
+[ ] **/proc/<pid>/net/dev:** Per-interface statistics on network activity.
+[ ] **/proc/<pid>/net/dev_snmp6:** More detailed, but IPv6-specific variant.
+[ ] **/proc/<pid>/net/ip_mr_cache:** Active IPv4 multicast routes.
+[ ] **/proc/<pid>/net/ip_mr_vif:** Active IPv4 multicast virtual interfaces.
+[ ] **/proc/<pid>/net/ip6_mr_cache:** Active IPv6 multicast routes.
+[ ] **/proc/<pid>/net/ip6_mr_vif:** Active IPv6 multicast virtual interfaces.
 [ ] **/proc/<pid>/sched:** Scheduling statistics for a given process.
 [ ] **/proc/<pid>/schedstat:** Process-specific version of some of the
     load_balance statistics from /proc/schedstat. See
@@ -105,11 +113,22 @@ studies in order to justify the cost of implementing a parser & API for them.
 * **/proc/<pid>/map_files:** Memory-mapped files and their vmem location.
 * **/proc/<pid>/maps:** Map of a process' virtual memory allocations.
 * **/proc/<pid>/mem:** Raw access to a process' virtual address space.
-* **/proc/<pid>/net:** Network configuration and statistics for the active
-  process' networking namespace.
 * **/proc/<pid>/mountinfo:** Mount points accessible to this process.
 * **/proc/<pid>/mounts:** An older (Linux 2.4) version of the same thing.
 * **/proc/<pid>/mountstats:** More metadata about mount points.
+* **/proc/<pid>/net/anycast6:** IPv6 anycast addresses, if enabled.
+* **/proc/<pid>/net/arp:** Kernel ARP tables, used for address resolutions.
+* **/proc/<pid>/net/connector:** Connector mechanism, used to receive
+  notifications of process events, such as fork, exec, UID/GID changes...
+* **/proc/<pid>/net/dev_mcast:** Layer 2 multicast groups being listened to.
+* **/proc/<pid>/net/fib_trie:** Kernel routing table.
+* **/proc/<pid>/net/fib_triestat:** Statistics on the kernel routing table.
+* **/proc/<pid>/net/icmp:** Information on active ICMP connections.
+* **/proc/<pid>/net/icmp6:** IPv6 version of the "icmp" file.
+* **/proc/<pid>/net/if_net6:** Configured IPv6 addresses on the system.
+* **/proc/<pid>/net/igmp:** Information on active IGMP connections.
+* **/proc/<pid>/net/igmp6:** IPv6 version of the "igmp" file.
+* **/proc/<pid>/net/ip6_flowlabel:** Active IPv6 flow labels.
 * **/proc/<pid>/ns:** Namespaces which a process belongs to.
 * **/proc/<pid>/numa_maps:** Some NUMA-related metadata on a process' virtual
   address space. Seems quite hard to interprete.
