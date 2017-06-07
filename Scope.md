@@ -35,10 +35,11 @@ an API which is optimized for single-shot readout (as opposed to sampling).
     process' networking namespace. Not fully interfaced.
 [ ] **/proc/<pid>/net/dev:** Per-interface statistics on network activity.
 [ ] **/proc/<pid>/net/dev_snmp6:** More detailed, but IPv6-specific variant.
-[ ] **/proc/<pid>/net/ip_mr_cache:** Active IPv4 multicast routes.
-[ ] **/proc/<pid>/net/ip_mr_vif:** Active IPv4 multicast virtual interfaces.
 [ ] **/proc/<pid>/net/ip6_mr_cache:** Active IPv6 multicast routes.
 [ ] **/proc/<pid>/net/ip6_mr_vif:** Active IPv6 multicast virtual interfaces.
+[ ] **/proc/<pid>/net/ip_mr_cache:** Active IPv4 multicast routes.
+[ ] **/proc/<pid>/net/ip_mr_vif:** Active IPv4 multicast virtual interfaces.
+[ ] **/proc/<pid>/net/netstat:** Lots of TCP & IP usage statistics.
 [ ] **/proc/<pid>/sched:** Scheduling statistics for a given process.
 [ ] **/proc/<pid>/schedstat:** Process-specific version of some of the
     load_balance statistics from /proc/schedstat. See
@@ -129,6 +130,16 @@ studies in order to justify the cost of implementing a parser & API for them.
 * **/proc/<pid>/net/igmp:** Information on active IGMP connections.
 * **/proc/<pid>/net/igmp6:** IPv6 version of the "igmp" file.
 * **/proc/<pid>/net/ip6_flowlabel:** Active IPv6 flow labels.
+* **/proc/<pid>/net/ip_tables_matches:** List of currently loaded matching
+  modules of the netfilter kernel firewall.
+* **/proc/<pid>/net/ip_tables_names:** Supported netfilter tables.
+* **/proc/<pid>/net/ip_tables_targets:** Targets of netfilter rules (?).
+* **/proc/<pid>/net/ipv6_route:** Active IPv6 routes.
+* **/proc/<pid>/net/mcfilter:** Some IPv4 multicast filtering mechanism (?).
+* **/proc/<pid>/net/mcfilter6:** Probably the IPv6 version of mcfilter (?).
+* **/proc/<pid>/net/netfilter:** More netfilter stuff, currently just logs.
+* **/proc/<pid>/net/netlink:** List of active Netlink sockets, used by processes
+  that wish to communicate with network drivers directly.
 * **/proc/<pid>/ns:** Namespaces which a process belongs to.
 * **/proc/<pid>/numa_maps:** Some NUMA-related metadata on a process' virtual
   address space. Seems quite hard to interprete.
