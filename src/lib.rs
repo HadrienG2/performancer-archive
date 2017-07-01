@@ -5,13 +5,13 @@ use std::io::{Read, Result, Seek, SeekFrom};
 use std::path::Path;
 
 
-/// Pseudo-files from /proc have a number of characteristics which this reader
-/// is designed to account for:
+/// Pseudo-files from /proc have a number of characteristics which this custom
+/// reader is designed to account for:
 ///
 /// * They are very small (a few kB at most), so they are best read in one go.
 /// * They are not actual files, so blocking file readout isn't an issue.
-/// * They almost exclusively contain text (and the few binary ones aren't very
-///   interesting for the purpose of performance studies).
+/// * They almost exclusively contain text, and the few binary ones aren't very
+///   interesting for the purpose of performance studies.
 /// * Their size does not vary much, so reusing readout buffers is worthwhile.
 /// * They can be "updated" just by seeking back to the beginning.
 /// * Their format is part of the kernel API, and should thust only be modified
