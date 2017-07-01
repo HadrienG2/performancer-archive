@@ -1,56 +1,21 @@
-//! TODO: This file needs documentation
+//! This library is a sampling interface to Linux' procfs (/proc)
+//!
+//! Its main design goal is to allow taking periodical measurements of system
+//! activity, as described by the Linux kernel's procfs API, at a relatively
+//! high rate (at least 1 kHz), for the purpose of performance analysis.
 
-mod uptime;
+pub mod parsers;
 
 use std::fs::File;
 use std::io::{Read, Result, Seek, SeekFrom};
 use std::path::Path;
-use std::time::Duration;
-
-
-// TODO: Organize implementation details better
-
-/// Specialized parser for Durations expressed in fractional seconds, using the
-/// usual text format XXXX[.[YY]]. This is about parsing standardized data, so
-/// the input is assumed to be correct, and errors will be handled via panics.
-fn parse_duration_secs(input: &str) -> Duration {
-    // Separate the integral part from the fractional part (if any)
-    let mut integer_iter = input.split('.');
-
-    // Parse the number of full seconds
-    let seconds = integer_iter.next().unwrap()
-                              .parse::<u64>().unwrap();
-
-    // Parse the number of extra nanoseconds, if any
-    let nanoseconds = match integer_iter.next() {
-        // Handle the "XXXX." syntax used by some text printers
-        Some("")       => 0,
-
-        // If there is something after the ., assume it is decimals. Sub nano-
-        // second decimals will be truncated: we only count whole nanoseconds.
-        Some(mut decimals) => {
-            if decimals.len() > 9 { decimals = &decimals[0..9]; }
-            let nanosecs_multiplier = 10u32.pow(9 - (decimals.len() as u32));
-            decimals.parse::<u32>().unwrap() * nanosecs_multiplier
-        }
-
-        // No decimals means no nanoseconds
-        None           => 0,
-    };
-
-    // At this point, we should be at the end of the string
-    debug_assert_eq!(integer_iter.next(), None);
-
-    // Return the Duration that we just parsed
-    Duration::new(seconds, nanoseconds)
-}
 
 
 /// Pseudo-files from /proc have a number of characteristics which this custom
 /// reader is designed to account for:
 ///
 /// * They are very small (a few kB at most), so they are best read in one go.
-/// * They are not actual files, so blocking file readout isn't an issue.
+/// * They are not actual files, so blocking readout isn't an issue.
 /// * They almost exclusively contain text, and the few binary ones aren't very
 ///   interesting for the purpose of performance studies.
 /// * Their size does not vary much, so reusing readout buffers is worthwhile.
@@ -59,8 +24,8 @@ fn parse_duration_secs(input: &str) -> Duration {
 ///   through backwards-compatible extensions.
 ///
 /// The general design of this reader should probably also work with /sys files,
-/// but since I have not yet started looking into these, I reserve my judgment
-/// on this matter for now.
+/// but since I have not yet started looking into these, I will refrain from
+/// making a strong statement on this matter for now.
 ///
 struct ProcFileReader {
     /// Persistent handle to the file being sampled
@@ -110,36 +75,37 @@ impl ProcFileReader {
 }
 
 
-/// For now, these tests are very much about experimenting
+/// These are the unit tests for this module
 #[cfg(test)]
 mod tests {
+    use std::thread;
     use std::time::Duration;
-    use uptime::UptimeSampler;
+    use super::ProcFileReader;
 
-    /// Check that our Duration parser works as expected
+    /// Check that opening /proc/uptime works as expected
     #[test]
-    fn parse_duration() {
-        assert_eq!(::parse_duration_secs("2"),
-                   Duration::new(2, 0));
-        assert_eq!(::parse_duration_secs("3."),
-                   Duration::new(3, 0));
-        assert_eq!(::parse_duration_secs("4.2"),
-                   Duration::new(4, 200_000_000));
-        assert_eq!(::parse_duration_secs("5.34"),
-                   Duration::new(5, 340_000_000));
-        assert_eq!(::parse_duration_secs("6.567891234"),
-                   Duration::new(6, 567_891_234));
-        assert_eq!(::parse_duration_secs("7.8901234567"),
-                   Duration::new(7, 890_123_456));
+    fn open_file() {
+        let _ = ProcFileReader::open("/proc/uptime").unwrap();
     }
 
-    /// Check that our uptime sampler works and is fast enough
-    /// TODO: This should move to the uptime module
+    /// Check that two uptime measurements separated by some sleep differ
     #[test]
-    fn it_works() {
-        let mut uptime = UptimeSampler::new().unwrap();
-        for _ in 0..10_000_000 {
-            uptime.sample().unwrap();
-        }
+    fn uptime_sampling() {
+        // Open the uptime file
+        let mut reader = ProcFileReader::open("/proc/uptime").unwrap();
+
+        // Read its contents once
+        let mut meas1 = String::new();
+        reader.sample(|text| meas1 = text.to_owned()).unwrap();
+
+        // Wait a bit
+        thread::sleep(Duration::from_millis(50));
+
+        // Read its contents again
+        let mut meas2 = String::new();
+        reader.sample(|text| meas2 = text.to_owned()).unwrap();
+
+        // The contents should have changed
+        assert!(meas1 != meas2);
     }
 }
