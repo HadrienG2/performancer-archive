@@ -1,28 +1,8 @@
+//! TODO: This file needs documentation
+
 use super::{ProcFileReader};
 use std::io::Result;
 use std::time::Duration;
-
-
-/// Data samples from /proc/uptime. This struct must be separated from the main
-/// sampler object in order to clearly separate multiple mutable borrows.
-/// TODO: Autogenerate this kind of vector sample struct from a scalar template
-struct UptimeData {
-    /// Elapsed wall clock time since the system was started
-    wall_clock_uptime: Vec<Duration>,
-
-    /// Cumulative amount of time spent by all CPUs in the idle state
-    cpu_idle_time: Vec<Duration>,
-}
-//
-impl UptimeData {
-    /// Create a new uptime data store
-    fn new() -> Self {
-        Self {
-            wall_clock_uptime: Vec::new(),
-            cpu_idle_time: Vec::new(),
-        }
-    }
-}
 
 
 /// Mechanism for sampling measurements from /proc/uptime
@@ -66,4 +46,24 @@ impl UptimeSampler {
     }
 
     // TODO: Add accessors to the inner uptime data
+}
+
+
+/// Data samples from /proc/uptime, in structure-of-array layout
+struct UptimeData {
+    /// Elapsed wall clock time since the system was started
+    wall_clock_uptime: Vec<Duration>,
+
+    /// Cumulative amount of time spent by all CPUs in the idle state
+    cpu_idle_time: Vec<Duration>,
+}
+//
+impl UptimeData {
+    /// Create a new uptime data store
+    fn new() -> Self {
+        Self {
+            wall_clock_uptime: Vec::new(),
+            cpu_idle_time: Vec::new(),
+        }
+    }
 }

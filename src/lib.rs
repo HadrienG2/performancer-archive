@@ -1,3 +1,5 @@
+//! TODO: This file needs documentation
+
 mod uptime;
 
 use std::fs::File;
@@ -132,6 +134,7 @@ mod tests {
     }
 
     /// Check that our uptime sampler works and is fast enough
+    /// TODO: This should move to the uptime module
     #[test]
     fn it_works() {
         let mut uptime = UptimeSampler::new().unwrap();
