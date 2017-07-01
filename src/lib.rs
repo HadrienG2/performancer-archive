@@ -4,6 +4,8 @@
 //! activity, as described by the Linux kernel's procfs API, at a relatively
 //! high rate (at least 1 kHz), for the purpose of performance analysis.
 
+extern crate testbench;
+
 pub mod parsers;
 
 use std::fs::File;
@@ -107,5 +109,33 @@ mod tests {
 
         // The contents should have changed
         assert!(meas1 != meas2);
+    }
+}
+
+
+/// Performance benchmarks
+///
+/// These benchmarks masquerading as tests are a stopgap solution until
+/// benchmarking lands in Stable Rust. They should be compiled in release mode,
+/// and run with only one OS thread. In addition, the default behaviour of
+/// swallowing test output should obviously be suppressed.
+///
+/// TL;DR: cargo test --release -- --ignored --nocapture --test-threads=1
+///
+/// TODO: Switch to standard Rust benchmarks once they are stable
+///
+#[cfg(test)]
+mod benchmarks {
+    use testbench;
+    use super::ProcFileReader;
+
+    /// Benchmark for the raw uptime readout overhead
+    #[test]
+    #[ignore]
+    fn uptime_readout_overhead() {
+        let mut reader = ProcFileReader::open("/proc/uptime").unwrap();
+        testbench::benchmark(3_000_000, || {
+            reader.sample(|_| {}).unwrap();
+        });
     }
 }

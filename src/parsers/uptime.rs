@@ -110,3 +110,25 @@ mod tests {
                     uptime.samples.cpu_idle_time[0]);
     }
 }
+
+
+
+/// Performance benchmarks
+///
+/// See the lib-wide benchmarks module for details on how to use these.
+///
+#[cfg(test)]
+mod benchmarks {
+    use testbench;
+    use super::UptimeSampler;
+
+    /// Benchmark for the full uptime sampling overhead
+    #[test]
+    #[ignore]
+    fn uptime_sampling_overhead() {
+        let mut uptime = UptimeSampler::new().unwrap();
+        testbench::benchmark(3_000_000, || {
+            uptime.sample().unwrap();
+        });
+    }
+}
