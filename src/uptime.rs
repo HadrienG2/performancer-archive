@@ -1,20 +1,17 @@
-use super::ProcFileReader;
+use super::{ProcFileReader};
 use std::io::Result;
-
-/// A fractional amount of seconds
-/// TODO: Use Duration instead
-type Seconds = f64;
+use std::time::Duration;
 
 
 /// Data samples from /proc/uptime. This struct must be separated from the main
 /// sampler object in order to clearly separate multiple mutable borrows.
 /// TODO: Autogenerate this kind of vector sample struct from a scalar template
 struct UptimeData {
-    /// Elapsed wall clock time in seconds since the system was started
-    wall_clock_uptime: Vec<Seconds>,
+    /// Elapsed wall clock time since the system was started
+    wall_clock_uptime: Vec<Duration>,
 
-    /// Cumulative amount of seconds spent by all CPUs in the idle state
-    cpu_idle_time: Vec<Seconds>,
+    /// Cumulative amount of time spent by all CPUs in the idle state
+    cpu_idle_time: Vec<Duration>,
 }
 //
 impl UptimeData {
@@ -53,15 +50,17 @@ impl UptimeSampler {
     pub fn sample(&mut self) -> Result<()> {
         let samples = &mut self.samples;
         self.reader.sample(|file_contents: &str| {
-            // Parse all known file contents (simple enough for uptime :))
+            // Parse all known file contents (simple enough for /proc/uptime :))
             let mut numbers_iter = file_contents.split_whitespace();
-            samples.wall_clock_uptime.push(numbers_iter.next().unwrap()
-                                                       .parse().unwrap());
-            samples.cpu_idle_time.push(numbers_iter.next().unwrap()
-                                                   .parse().unwrap());
+            samples.wall_clock_uptime.push(
+                super::parse_duration_secs(numbers_iter.next().unwrap())
+            );
+            samples.cpu_idle_time.push(
+                super::parse_duration_secs(numbers_iter.next().unwrap())
+            );
 
-            // If this assert fails, the contents of the file have been extended
-            // by a kernel revision, and the parser should be updated
+            // If this debug assert fails, the contents of the file have been
+            // extended by a kernel revision, and the parser should be updated
             debug_assert!(numbers_iter.next() == None);
         })
     }

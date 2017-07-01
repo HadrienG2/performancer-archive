@@ -3,6 +3,45 @@ mod uptime;
 use std::fs::File;
 use std::io::{Read, Result, Seek, SeekFrom};
 use std::path::Path;
+use std::time::Duration;
+
+
+// TODO: Organize implementation details better
+
+/// Specialized parser for Durations expressed in fractional seconds, using the
+/// usual text format XXXX[.[YY]]. This is about parsing standardized data, so
+/// the input is assumed to be correct, and errors will be handled via panics.
+fn parse_duration_secs(input: &str) -> Duration {
+    // Separate the integral part from the fractional part (if any)
+    let mut integer_iter = input.split('.');
+
+    // Parse the number of full seconds
+    let seconds = integer_iter.next().unwrap()
+                              .parse::<u64>().unwrap();
+
+    // Parse the number of extra nanoseconds, if any
+    let nanoseconds = match integer_iter.next() {
+        // Handle the "XXXX." syntax used by some text printers
+        Some("")       => 0,
+
+        // If there is something after the ., assume it is decimals. Sub nano-
+        // second decimals will be truncated: we only count whole nanoseconds.
+        Some(mut decimals) => {
+            if decimals.len() > 9 { decimals = &decimals[0..9]; }
+            let nanosecs_multiplier = 10u32.pow(9 - (decimals.len() as u32));
+            decimals.parse::<u32>().unwrap() * nanosecs_multiplier
+        }
+
+        // No decimals means no nanoseconds
+        None           => 0,
+    };
+
+    // At this point, we should be at the end of the string
+    debug_assert_eq!(integer_iter.next(), None);
+
+    // Return the Duration that we just parsed
+    Duration::new(seconds, nanoseconds)
+}
 
 
 /// Pseudo-files from /proc have a number of characteristics which this custom
@@ -72,8 +111,27 @@ impl ProcFileReader {
 /// For now, these tests are very much about experimenting
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     use uptime::UptimeSampler;
 
+    /// Check that our Duration parser works as expected
+    #[test]
+    fn parse_duration() {
+        assert_eq!(::parse_duration_secs("2"),
+                   Duration::new(2, 0));
+        assert_eq!(::parse_duration_secs("3."),
+                   Duration::new(3, 0));
+        assert_eq!(::parse_duration_secs("4.2"),
+                   Duration::new(4, 200_000_000));
+        assert_eq!(::parse_duration_secs("5.34"),
+                   Duration::new(5, 340_000_000));
+        assert_eq!(::parse_duration_secs("6.567891234"),
+                   Duration::new(6, 567_891_234));
+        assert_eq!(::parse_duration_secs("7.8901234567"),
+                   Duration::new(7, 890_123_456));
+    }
+
+    /// Check that our uptime sampler works and is fast enough
     #[test]
     fn it_works() {
         let mut uptime = UptimeSampler::new().unwrap();
