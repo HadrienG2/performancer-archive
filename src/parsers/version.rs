@@ -9,6 +9,12 @@ use std::fs::File;
 use std::io::{Read, Result};
 
 
+lazy_static! {
+    /// We should only need to parse the host's kernel version once
+    pub static ref LINUX_VERSION: LinuxVersion = LinuxVersion::load().unwrap();
+}
+
+
 /// Mechanism to collect kernel versioning information
 #[derive(Debug, Eq, PartialEq)]
 pub struct LinuxVersion {
@@ -79,13 +85,10 @@ impl LinuxVersion {
 }
 
 
-// TODO: Add a lazy_static representing the kernel version
-
-
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::LinuxVersion;
+    use super::{LinuxVersion, LINUX_VERSION};
 
     /// Test the linux kernel version string parser
     #[test]
@@ -142,7 +145,7 @@ mod tests {
     /// Check that reading the kernel version string of the host works
     #[test]
     fn load_host_version() {
-        let _ = LinuxVersion::load();
+        assert_eq!(*LINUX_VERSION, LinuxVersion::load().unwrap());
     }
 
     /// Check that kernel version compatibility checks work
@@ -176,6 +179,3 @@ mod tests {
         assert!(!version.smaller(3, 3, 6));
     }
 }
-
-
-// TODO: Benchmark relative performance of lazy_static and an inner reference to it (if the later is feasible)
