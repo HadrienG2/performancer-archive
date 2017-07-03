@@ -15,6 +15,7 @@
 //! extracted to a dedicated "detail" submodule.
 
 pub mod uptime;
+pub mod version;
 
 use std::time::Duration;
 

@@ -5,3 +5,4 @@ authors = ["Hadrien G. <knights_of_ni@gmx.com>"]
 
 [dependencies]
 testbench = "^0"
+regex = "^0.2"

@@ -4,6 +4,7 @@
 //! activity, as described by the Linux kernel's procfs API, at a relatively
 //! high rate (at least 1 kHz), for the purpose of performance analysis.
 
+extern crate regex;
 extern crate testbench;
 
 pub mod parsers;
