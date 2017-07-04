@@ -4,6 +4,7 @@
 //! activity, as described by the Linux kernel's procfs API, at a relatively
 //! high rate (at least 1 kHz), for the purpose of performance analysis.
 
+extern crate chrono;
 #[macro_use] extern crate lazy_static;
 extern crate regex;
 extern crate testbench;
@@ -100,14 +101,14 @@ mod tests {
 
         // Read its contents once
         let mut meas1 = String::new();
-        reader.sample(|text| meas1 = text.to_owned()).unwrap();
+        reader.sample(|text| meas1.push_str(text)).unwrap();
 
         // Wait a bit
         thread::sleep(Duration::from_millis(50));
 
         // Read its contents again
         let mut meas2 = String::new();
-        reader.sample(|text| meas2 = text.to_owned()).unwrap();
+        reader.sample(|text| meas2.push_str(text)).unwrap();
 
         // The contents should have changed
         assert!(meas1 != meas2);

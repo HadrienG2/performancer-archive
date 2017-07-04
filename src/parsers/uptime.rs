@@ -112,7 +112,6 @@ mod tests {
 }
 
 
-
 /// Performance benchmarks
 ///
 /// See the lib-wide benchmarks module for details on how to use these.

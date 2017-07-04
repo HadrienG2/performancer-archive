@@ -14,6 +14,7 @@
 //! usable by multiple modules. If this shared utility library grows, it will be
 //! extracted to a dedicated "detail" submodule.
 
+pub mod stat;
 pub mod uptime;
 pub mod version;
 
