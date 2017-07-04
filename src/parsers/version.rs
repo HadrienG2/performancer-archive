@@ -18,15 +18,28 @@ lazy_static! {
 /// Mechanism to collect kernel versioning information
 #[derive(Debug, Eq, PartialEq)]
 pub struct LinuxVersion {
-    // Upstream kernel version, following Linux 3.x style
-    major: u8,
-    minor: u8,
-    bugfix: u8,
+    /// Upstream kernel version, following Linux 3.x style
+    ///
+    /// Be warned that in the pre-3.0 era, these nubers actually had different
+    /// semantics: the third "bugfix" number was actually used for feature
+    /// releases, and a fourth version number was used for bugfixes.
+    ///
+    /// Because Linux 2.6 has long been unmaintained and is only used by
+    /// obsolete "entreprise" Linux distributions, we believe that not
+    /// fully supporting its versioning scheme is an acceptable compromise.
+    ///
+    pub major: u8,
+    pub minor: u8,
+    pub bugfix: u8,
 
-    // Distribution-specific versioning information and kernel flavours
-    flavour: Option<String>,
+    /// Distribution-specific versioning information and kernel flavours.
+    /// Parsing this further would require an extensive study of ditributions'
+    /// kernel versioning schemes, which I am not ready to carry out right now.
+    /// So as a stopgap solution, this is not yet part of the public interface.
+    distro_flavour: Option<String>,
 
-    // Build information (not parsed)
+    /// Build information (host, compiler, date...) is not parsed either, since
+    /// we have no use for it at the momment.
     build_info: String,
 }
 //
@@ -68,7 +81,7 @@ impl LinuxVersion {
         assert_eq!(&trimmed_version[0..5], "Linux");
 
         // Ultimately, the contents of /proc/version should match this regex
-        let version_regex = Regex::new(r"^Linux version (?P<major>[1-9]\d*)\.(?P<minor>\d+)(?:\.(?P<bugfix>\d+))?(?:-(?P<flavour>\S+))? (?P<build_info>.+)$").unwrap();
+        let version_regex = Regex::new(r"^Linux version (?P<major>[1-9]\d*)\.(?P<minor>\d+)(?:\.(?P<bugfix>\d+))?(?:-(?P<distro_flavour>\S+))? (?P<build_info>.+)$").unwrap();
         let captures = version_regex.captures(trimmed_version).unwrap();
 
         // Return the parsed kernel version
@@ -77,8 +90,8 @@ impl LinuxVersion {
             minor: captures["minor"].parse().unwrap(),
             bugfix: captures.name("bugfix")
                             .map_or(0, |m| m.as_str().parse().unwrap()),
-            flavour: captures.name("flavour")
-                             .map(|m| m.as_str().parse().unwrap()),
+            distro_flavour: captures.name("distro_flavour")
+                                    .map(|m| m.as_str().parse().unwrap()),
             build_info: captures["build_info"].to_owned(),
         }
     }
@@ -100,7 +113,7 @@ mod tests {
                 major: 4,
                 minor: 2,
                 bugfix: 0,
-                flavour: None,
+                distro_flavour: None,
                 build_info: String::from("(gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
             }
         );
@@ -112,7 +125,7 @@ mod tests {
                 major: 4,
                 minor: 2,
                 bugfix: 7,
-                flavour: None,
+                distro_flavour: None,
                 build_info: String::from("(gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
             }
         );
@@ -124,7 +137,7 @@ mod tests {
                 major: 4,
                 minor: 2,
                 bugfix: 0,
-                flavour: Some(String::from("yeah")),
+                distro_flavour: Some(String::from("yeah")),
                 build_info: String::from("(gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
             }
         );
@@ -136,7 +149,7 @@ mod tests {
                 major: 4,
                 minor: 2,
                 bugfix: 9,
-                flavour: Some(String::from("wooo")),
+                distro_flavour: Some(String::from("wooo")),
                 build_info: String::from("(gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
             }
         );
@@ -156,7 +169,7 @@ mod tests {
             major: 4,
             minor: 2,
             bugfix: 5,
-            flavour: None,
+            distro_flavour: None,
             build_info: String::new(),
         };
 
