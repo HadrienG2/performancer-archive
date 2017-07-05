@@ -6,6 +6,7 @@
 
 extern crate chrono;
 #[macro_use] extern crate lazy_static;
+extern crate libc;
 extern crate regex;
 extern crate testbench;
 

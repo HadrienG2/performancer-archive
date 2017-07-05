@@ -2,7 +2,9 @@
 
 use ::ProcFileReader;
 use chrono::{DateTime, TimeZone, Utc};
+use libc;
 use std::io::Result;
+use std::str::SplitWhitespace;
 use std::time::Duration;
 
 
@@ -33,6 +35,7 @@ impl StatSampler {
     pub fn sample(&mut self) -> Result<()> {
         let samples = &mut self.samples;
         self.reader.sample(|file_contents: &str| {
+            // TODO: Extract parsing logic to StatData
             // TODO: Parse the contents of /proc/stat, add debug_asserts for unknown entries
             unimplemented!();
         })
@@ -97,8 +100,10 @@ impl StatData {
         // Our statistical data store will eventually go there
         let mut data: Self = Default::default();
 
-        // For each line of the initial contents of /proc/stat...
+        // The amount of CPU timers will go there once it's known
         let mut num_cpu_timers = 0u8;
+
+        // For each line of the initial contents of /proc/stat...
         for line in initial_contents.lines() {
             // ...decompose according whitespace...
             let mut whitespace_iter = line.split_whitespace();
@@ -218,6 +223,9 @@ struct CPUStatData {
 
     /// Time spent running a niced guest (see above, since Linux 2.6.33)
     guest_nice_time: Option<Vec<Duration>>,
+
+    /// INTERNAL: Number of "ticks" from /proc/stat per second
+    ticks_per_sec: u64,
 }
 //
 impl CPUStatData {
@@ -227,7 +235,7 @@ impl CPUStatData {
         debug_assert!(num_timers >= 4, "Not expected from man 5 proc!");
         debug_assert!(num_timers <= 10, "Unknown CPU timers detected!");
 
-        // Conditionally create a certain amount of timing Vecs
+        // Prepare to conditionally create a certain amount of timing Vecs
         let mut created_vecs = 4;
         let mut conditional_vec = || -> Option<Vec<Duration>> {
             created_vecs += 1;
@@ -240,17 +248,63 @@ impl CPUStatData {
 
         // Create the statistics
         Self {
+            // These CPU timers should always be there
             user_time: Vec::new(),
             nice_time: Vec::new(),
             system_time: Vec::new(),
             idle_time: Vec::new(),
+
+            // These may or may not be there depending on kernel version
             io_wait_time: conditional_vec(),
             irq_time: conditional_vec(),
             softirq_time: conditional_vec(),
             stolen_time: conditional_vec(),
             guest_time: conditional_vec(),
             guest_nice_time: conditional_vec(),
+
+            // We need this to convert /proc/stat readouts into Durations
+            ticks_per_sec: unsafe { libc::sysconf(libc::_SC_CLK_TCK) as u64 },
         }
+    }
+
+    /// Parse CPU statistics and add them to the internal data store
+    fn push(&mut self, mut stats: SplitWhitespace) {
+        // This scope is needed to please rustc's current borrow checker
+        {
+            // This is how we parse the next duration from the input (if any)
+            let ticks_per_sec = self.ticks_per_sec;
+            let mut next_stat = || -> Option<Duration> {
+                stats.next().map(|str_duration| -> Duration {
+                    let raw_ticks: u64 = str_duration.parse().unwrap();
+                    let secs = raw_ticks / ticks_per_sec;
+                    let nanosecs = (raw_ticks % ticks_per_sec)
+                                        * (1_000_000_000 / ticks_per_sec);
+                    Duration::new(secs, nanosecs as u32)
+                })
+            };
+
+            // Load the "mandatory" CPU statistics
+            self.user_time.push(next_stat().unwrap());
+            self.nice_time.push(next_stat().unwrap());
+            self.system_time.push(next_stat().unwrap());
+            self.idle_time.push(next_stat().unwrap());
+
+            // Load the "optional" CPU statistics
+            let mut load_optional_stat = |stat: &mut Option<Vec<Duration>>| {
+                if let Some(ref mut vec) = *stat {
+                    vec.push(next_stat().unwrap());
+                }
+            };
+            load_optional_stat(&mut self.io_wait_time);
+            load_optional_stat(&mut self.irq_time);
+            load_optional_stat(&mut self.softirq_time);
+            load_optional_stat(&mut self.stolen_time);
+            load_optional_stat(&mut self.guest_time);
+            load_optional_stat(&mut self.guest_nice_time);
+        }
+
+        // At this point, we should have loaded all available stats
+        debug_assert!(stats.next().is_none());
     }
 }
 
@@ -274,6 +328,20 @@ impl InterruptStatData {
             details: vec![Vec::new(); num_irqs as usize],
         }
     }
+
+    /// Parse interrupt statistics and add them to the internal data store
+    fn push(&mut self, mut stats: SplitWhitespace) {
+        // Load the total interrupt count
+        self.total.push(stats.next().unwrap().parse().unwrap());
+
+        // Load the detailed interrupt counts from each source
+        for detail in self.details.iter_mut() {
+            detail.push(stats.next().unwrap().parse().unwrap());
+        }
+
+        // At this point, we should have loaded all available stats
+        debug_assert!(stats.next().is_none());
+    }
 }
 
 
@@ -295,6 +363,16 @@ impl PagingStatData {
             outgoing: Vec::new(),
         }
     }
+
+    /// Parse paging statistics and add them to the internal data store
+    fn push(&mut self, mut stats: SplitWhitespace) {
+        // Load the incoming and outgoing page count
+        self.incoming.push(stats.next().unwrap().parse().unwrap());
+        self.outgoing.push(stats.next().unwrap().parse().unwrap());
+
+        // At this point, we should have loaded all available stats
+        debug_assert!(stats.next().is_none());
+    }
 }
 
 
@@ -302,6 +380,7 @@ impl PagingStatData {
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
+    use std::time::Duration;
     use super::{CPUStatData, InterruptStatData, PagingStatData, StatData};
 
     // Check that CPU statistics initialization works as expected
@@ -328,6 +407,39 @@ mod tests {
         assert_eq!(latest_stats.guest_nice_time, Some(Vec::new()));
     }
 
+    // Check that parsing CPU statistics works as expected
+    #[test]
+    fn parse_cpu_stat() {
+        // Oldest known CPU stats format from Linux 4.11's man proc
+        let mut oldest_stats = CPUStatData::new(4);
+
+        // Figure out the duration of a kernel tick
+        let tick_duration = Duration::new(
+            0,
+            (1_000_000_000 / oldest_stats.ticks_per_sec) as u32
+        );
+
+        // Check that "old" CPU stats are parsed properly
+        oldest_stats.push("165 18 96 1".split_whitespace());
+        assert_eq!(oldest_stats.user_time,   vec![tick_duration*165]);
+        assert_eq!(oldest_stats.nice_time,   vec![tick_duration*18]);
+        assert_eq!(oldest_stats.system_time, vec![tick_duration*96]);
+        assert_eq!(oldest_stats.idle_time,   vec![tick_duration]);
+        assert!(oldest_stats.io_wait_time.is_none());
+
+        // Check that "extended" stats are parsed as well
+        let mut first_ext_stats = CPUStatData::new(5);
+        first_ext_stats.push("9 698 6521 151 56".split_whitespace());
+        assert_eq!(first_ext_stats.io_wait_time, Some(vec![tick_duration*56]));
+        assert!(first_ext_stats.irq_time.is_none());
+
+        // Check that "complete" stats are parsed as well
+        let mut latest_stats = CPUStatData::new(10);
+        latest_stats.push("18 9616 11 941 5 51 9 615 62 14".split_whitespace());
+        assert_eq!(latest_stats.io_wait_time,    Some(vec![tick_duration*5]));
+        assert_eq!(latest_stats.guest_nice_time, Some(vec![tick_duration*14]));
+    }
+
     // Check that interrupt statistics initialization works as expected
     #[test]
     fn init_interrupt_stat() {
@@ -337,25 +449,49 @@ mod tests {
         assert_eq!(no_details_stats.details.len(), 0);
 
         // Check that interrupt statistics with two detailed counters work
-        let no_details_stats = InterruptStatData::new(2);
-        assert_eq!(no_details_stats.details.len(), 2);
-        assert_eq!(no_details_stats.details[0].len(), 0);
-        assert_eq!(no_details_stats.details[1].len(), 0);
+        let two_stats = InterruptStatData::new(2);
+        assert_eq!(two_stats.details.len(), 2);
+        assert_eq!(two_stats.details[0].len(), 0);
+        assert_eq!(two_stats.details[1].len(), 0);
 
         // Check that interrupt statistics with lots of detailed counters work
-        let no_details_stats = InterruptStatData::new(256);
-        assert_eq!(no_details_stats.details.len(), 256);
-        assert_eq!(no_details_stats.details[0].len(), 0);
-        assert_eq!(no_details_stats.details[255].len(), 0);
+        let many_stats = InterruptStatData::new(256);
+        assert_eq!(many_stats.details.len(), 256);
+        assert_eq!(many_stats.details[0].len(), 0);
+        assert_eq!(many_stats.details[255].len(), 0);
+    }
+
+    // Check that parsing interrupt statistics works as expected
+    #[test]
+    fn parse_interrupt_stat() {
+        // Interrupt statistics without any detail
+        let mut no_details_stats = InterruptStatData::new(0);
+        no_details_stats.push("12345".split_whitespace());
+        assert_eq!(no_details_stats.total, vec![12345]);
+        assert_eq!(no_details_stats.details.len(), 0);
+
+        // Interrupt statistics with two detailed counters
+        let mut two_stats = InterruptStatData::new(2);
+        two_stats.push("12345 678 910".split_whitespace());
+        assert_eq!(two_stats.total, vec![12345]);
+        assert_eq!(two_stats.details, vec![vec![678], vec![910]]);
     }
 
     // Check that paging statistics initialization works as expected
     #[test]
     fn init_paging_stat() {
-        // Check that paging statistics initialization works
         let stats = PagingStatData::new();
         assert_eq!(stats.incoming.len(), 0);
         assert_eq!(stats.outgoing.len(), 0);
+    }
+
+    // Check that parsing paging statistics works as expected
+    #[test]
+    fn parse_paging_stat() {
+        let mut stats = PagingStatData::new();
+        stats.push("123 456".split_whitespace());
+        assert_eq!(stats.incoming, vec![123]);
+        assert_eq!(stats.outgoing, vec![456]);
     }
 
     // Check that statistical data initialization works as expected
