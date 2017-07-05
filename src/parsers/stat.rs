@@ -5,7 +5,6 @@ use chrono::{DateTime, TimeZone, Utc};
 use libc;
 use std::fmt::Debug;
 use std::io::Result;
-use std::iter;
 use std::str::{FromStr, SplitWhitespace};
 use std::time::Duration;
 
@@ -36,11 +35,7 @@ impl StatSampler {
     /// Acquire a new sample of statistical data
     pub fn sample(&mut self) -> Result<()> {
         let samples = &mut self.samples;
-        self.reader.sample(|file_contents: &str| {
-            // TODO: Extract parsing logic to StatData
-            // TODO: Parse the contents of /proc/stat, add debug_asserts for unknown entries
-            unimplemented!();
-        })
+        self.reader.sample(|file_contents: &str| samples.push(file_contents))
     }
 
     // TODO: Add accessors to the inner stat data + associated tests
@@ -232,51 +227,40 @@ impl StatData {
                                            .zip(self.line_target.iter()) {
             // The beginning of parsing is the same as before: split by spaces.
             // But this time, we discard the header, as we already know it.
-            let mut contents_iter = line.split_whitespace();
-            contents_iter.next();
+            let mut stats = line.split_whitespace();
+            stats.next();
 
             // Forward the /proc/stat data to the appropriate parser
-            // TODO: Simplify this by the power of traits (requires using a
-            //       similar logic for EachCPU and for scalar quantities)
             match *member {
                 StatDataMember::AllCPUs => {
-                    let all_cpus = self.all_cpus.as_mut().unwrap();
-                    all_cpus.push(contents_iter);
+                    Self::force_push(&mut self.all_cpus, stats);
                 },
                 StatDataMember::EachCPU => {
-                    cpu_iter.next().unwrap().push(contents_iter);
+                    cpu_iter.next().unwrap().push(stats);
                 },
                 StatDataMember::Paging => {
-                    let paging = self.paging.as_mut().unwrap();
-                    paging.push(contents_iter);
+                    Self::force_push(&mut self.paging, stats);
                 },
                 StatDataMember::Swapping => {
-                    let swapping = self.swapping.as_mut().unwrap();
-                    swapping.push(contents_iter);
+                    Self::force_push(&mut self.swapping, stats);
                 },
                 StatDataMember::Interrupts => {
-                    let interrupts = self.interrupts.as_mut().unwrap();
-                    interrupts.push(contents_iter);
+                    Self::force_push(&mut self.interrupts, stats);
                 },
                 StatDataMember::ContextSwitches => {
-                    Self::push_sample(&mut self.context_switches,
-                                      contents_iter);
+                    Self::force_push(&mut self.context_switches, stats);
                 },
                 StatDataMember::ProcessForks => {
-                    Self::push_sample(&mut self.process_forks,
-                                      contents_iter);
+                    Self::force_push(&mut self.process_forks, stats);
                 },
                 StatDataMember::RunnableProcesses => {
-                    Self::push_sample(&mut self.runnable_processes,
-                                      contents_iter);
+                    Self::force_push(&mut self.runnable_processes, stats);
                 },
                 StatDataMember::BlockedProcesses => {
-                    Self::push_sample(&mut self.blocked_processes,
-                                      contents_iter);
+                    Self::force_push(&mut self.blocked_processes, stats);
                 },
                 StatDataMember::SoftIRQs => {
-                    let softirqs = self.softirqs.as_mut().unwrap();
-                    softirqs.push(contents_iter);
+                    Self::force_push(&mut self.softirqs, stats);
                 }
                 StatDataMember::BootTime | StatDataMember::Unsupported => {},
             }
@@ -286,16 +270,12 @@ impl StatData {
         debug_assert!(cpu_iter.next().is_none());
     }
 
-    // INTERNAL: This is a basic stat parser for primitive types
-    // TODO: Complement that with a parsing trait
-    fn push_sample<T, U>(target: &mut Option<Vec<T>>,
-                         mut stats: SplitWhitespace)
-        where T: FromStr<Err=U>,
-              U: Debug
+    // INTERNAL: Helpful wrapper for pushing into optional containers that we
+    //           actually know from separate metadata to be around
+    fn force_push<T>(target: &mut Option<T>, stats: SplitWhitespace)
+        where T: StatDataParser
     {
-        let vec = target.as_mut().unwrap();
-        vec.push(stats.next().unwrap().parse().unwrap());
-        debug_assert!(stats.next().is_none());
+        target.as_mut().unwrap().push(stats);
     }
 }
 //
@@ -318,6 +298,26 @@ enum StatDataMember {
 
     // Special entry for unsupported fields of /proc/stat
     Unsupported
+}
+
+
+/// Every container of /proc/stat data should implement the following trait,
+/// which exposes its ability to be filled from segmented /proc/stat contents.
+trait StatDataParser {
+    /// Parse and record a sample of data from /proc/stat
+    fn push(&mut self, stats: SplitWhitespace);
+}
+
+
+/// We implement this trait for primitive types that can be parsed from &str
+impl<T, U> StatDataParser for Vec<T>
+    where T: FromStr<Err=U>,
+          U: Debug
+{
+    fn push(&mut self, mut stats: SplitWhitespace) {
+        self.push(stats.next().unwrap().parse().unwrap());
+        debug_assert!(stats.next().is_none());
+    }
 }
 
 
@@ -397,7 +397,9 @@ impl CPUStatData {
             ticks_per_sec: unsafe { libc::sysconf(libc::_SC_CLK_TCK) as u64 },
         }
     }
-
+}
+//
+impl StatDataParser for CPUStatData {
     /// Parse CPU statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitWhitespace) {
         // This scope is needed to please rustc's current borrow checker
@@ -459,7 +461,9 @@ impl InterruptStatData {
             details: vec![Vec::new(); num_irqs as usize],
         }
     }
-
+}
+//
+impl StatDataParser for InterruptStatData {
     /// Parse interrupt statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitWhitespace) {
         // Load the total interrupt count
@@ -494,7 +498,9 @@ impl PagingStatData {
             outgoing: Vec::new(),
         }
     }
-
+}
+//
+impl StatDataParser for PagingStatData {
     /// Parse paging statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitWhitespace) {
         // Load the incoming and outgoing page count
@@ -513,7 +519,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use std::time::Duration;
     use super::{CPUStatData, InterruptStatData, PagingStatData, StatData,
-                StatDataMember};
+                StatDataMember, StatDataParser};
 
     // Check that CPU statistics initialization works as expected
     #[test]
@@ -784,7 +790,6 @@ mod benchmarks {
         });
     }
 
-    /* TODO: Restore this
     /// Benchmark for the full stat sampling overhead
     #[test]
     #[ignore]
@@ -793,5 +798,5 @@ mod benchmarks {
         testbench::benchmark(100_000, || {
             stat.sample().unwrap();
         });
-    } */
+    }
 }
