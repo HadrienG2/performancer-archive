@@ -3,8 +3,10 @@
 use ::ProcFileReader;
 use chrono::{DateTime, TimeZone, Utc};
 use libc;
+use std::fmt::Debug;
 use std::io::Result;
-use std::str::SplitWhitespace;
+use std::iter;
+use std::str::{FromStr, SplitWhitespace};
 use std::time::Duration;
 
 
@@ -57,8 +59,12 @@ struct StatData {
     /// Total CPU usage stats, aggregated across all hardware threads
     all_cpus: Option<CPUStatData>,
 
-    /// Per-CPU usage statistics, featuring one entry per hardware thread
-    each_cpu: Option<Vec<CPUStatData>>,
+    /// Per-CPU usage statistics, featuring one entry per hardware thread.
+    ///
+    /// An empty Vec here has the same meaning as a None in other entries: the
+    /// per-thread breakdown of CPU usage was not provided by the kernel.
+    ///
+    each_cpu: Vec<CPUStatData>,
 
     /// Number of pages that the system paged in and out from disk, overall...
     paging: Option<PagingStatData>,
@@ -131,19 +137,8 @@ impl StatData {
 
                 // Statistics on a specific CPU thread
                 header if &header[0..3] == "cpu" => {
-                    // If we didn't know, note that we have per-thread data and
-                    // check data format consistency with global CPU stats
-                    if data.each_cpu.is_none() {
-                        assert_eq!(whitespace_iter.count() as u8,
-                                   num_cpu_timers);
-                        data.each_cpu = Some(Vec::new());
-                    }
-
-                    // Add one thread-specific entry to the list
-                    if let Some(ref mut cpu_vec) = data.each_cpu {
-                        cpu_vec.push(CPUStatData::new(num_cpu_timers));
-                        data.line_target.push(StatDataMember::EachCPU);
-                    }
+                    data.each_cpu.push(CPUStatData::new(num_cpu_timers));
+                    data.line_target.push(StatDataMember::EachCPU);
                 },
 
                 // Paging statistics
@@ -239,7 +234,9 @@ impl StatData {
             let mut contents_iter = line.split_whitespace();
             contents_iter.next();
 
-            // Forward the /proc/stat data to the appropriate member
+            // Forward the /proc/stat data to the appropriate parser
+            // TODO: Simplify this by the power of traits (requires using a
+            //       similar logic for EachCPU and for scalar quantities)
             use self::StatDataMember::*;
             match *member {
                 AllCPUs  => {
@@ -247,8 +244,7 @@ impl StatData {
                     all_cpus.push(contents_iter);
                 },
                 EachCPU  => {
-                    let each_cpu = self.each_cpu.as_mut().unwrap();
-                    each_cpu[curr_thread].push(contents_iter);
+                    self.each_cpu[curr_thread].push(contents_iter);
                     curr_thread += 1;
                 },
                 Paging   => {
@@ -266,29 +262,21 @@ impl StatData {
                 ContextSwitches => {
                     let context_switches = self.context_switches.as_mut()
                                                                 .unwrap();
-                    context_switches.push(contents_iter.next().unwrap()
-                                                       .parse().unwrap());
-                    debug_assert!(contents_iter.next().is_none());
+                    Self::push_scalar(context_switches, contents_iter);
                 },
                 ProcessForks => {
                     let process_forks = self.process_forks.as_mut().unwrap();
-                    process_forks.push(contents_iter.next().unwrap()
-                                                    .parse().unwrap());
-                    debug_assert!(contents_iter.next().is_none());
+                    Self::push_scalar(process_forks, contents_iter);
                 },
                 RunnableProcesses => {
                     let runnable_processes = self.runnable_processes.as_mut()
                                                                     .unwrap();
-                    runnable_processes.push(contents_iter.next().unwrap()
-                                                         .parse().unwrap());
-                    debug_assert!(contents_iter.next().is_none());
+                    Self::push_scalar(runnable_processes, contents_iter);
                 },
                 BlockedProcesses => {
                     let blocked_processes = self.blocked_processes.as_mut()
                                                                   .unwrap();
-                    blocked_processes.push(contents_iter.next().unwrap()
-                                                        .parse().unwrap());
-                    debug_assert!(contents_iter.next().is_none());
+                    Self::push_scalar(blocked_processes, contents_iter);
                 },
                 SoftIRQs => {
                     let softirqs = self.softirqs.as_mut().unwrap();
@@ -297,6 +285,15 @@ impl StatData {
                 BootTime | Unsupported => {},
             }
         }
+    }
+
+    // INTERNAL: This is a basic stat parser for primitive types
+    fn push_scalar<T, U>(target: &mut Vec<T>, mut stats: SplitWhitespace)
+        where T: FromStr<Err=U>,
+              U: Debug
+    {
+        target.push(stats.next().unwrap().parse().unwrap());
+        debug_assert!(stats.next().is_none());
     }
 }
 //
@@ -634,7 +631,7 @@ mod tests {
         let mut stats = String::new();
         let empty_stats = StatData::new(&stats);
         assert!(empty_stats.all_cpus.is_none());
-        assert!(empty_stats.each_cpu.is_none());
+        assert_eq!(empty_stats.each_cpu.len(), 0);
         assert!(empty_stats.paging.is_none());
         assert!(empty_stats.swapping.is_none());
         assert!(empty_stats.interrupts.is_none());
@@ -657,7 +654,7 @@ mod tests {
         stats.push_str("\ncpu0 0 1 1 3
                           cpu1 1 1 2 1");
         let local_cpu_stats = StatData::new(&stats);
-        expected.each_cpu = Some(vec![CPUStatData::new(4); 2]);
+        expected.each_cpu = vec![CPUStatData::new(4); 2];
         expected.line_target.push(StatDataMember::EachCPU);
         expected.line_target.push(StatDataMember::EachCPU);
         assert_eq!(local_cpu_stats, expected);
