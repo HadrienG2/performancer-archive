@@ -53,7 +53,7 @@ impl LinuxVersion {
         let trimmed_version = raw_version.trim_right();
 
         // Parse it and return the result
-        Ok(Self::parse_version_string(trimmed_version))
+        Ok(Self::parse(trimmed_version))
     }
 
     // Check if we are using at least a certain kernel version (included)
@@ -75,8 +75,8 @@ impl LinuxVersion {
         return !self.greater_eq(major, minor, bugfix);
     }
 
-    // INTERNAL: Parse a kernel version string from /proc/version
-    fn parse_version_string(trimmed_version: &str) -> Self {
+    // INTERNAL: Parse the (trimmed) contents of /proc/version
+    fn parse(trimmed_version: &str) -> Self {
         // This library only supports Linux's flavour of procfs
         assert_eq!(&trimmed_version[0..5], "Linux");
 
@@ -108,7 +108,7 @@ mod tests {
     fn parse_version() {
         // No bugfix version and no flavour
         assert_eq!(
-            LinuxVersion::parse_version_string("Linux version 4.2 (gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
+            LinuxVersion::parse("Linux version 4.2 (gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
             LinuxVersion {
                 major: 4,
                 minor: 2,
@@ -120,7 +120,7 @@ mod tests {
 
         // A bugfix version, but no flavour
         assert_eq!(
-            LinuxVersion::parse_version_string("Linux version 4.2.7 (gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
+            LinuxVersion::parse("Linux version 4.2.7 (gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
             LinuxVersion {
                 major: 4,
                 minor: 2,
@@ -132,7 +132,7 @@ mod tests {
 
         // A flavour, but no bugfix version
         assert_eq!(
-            LinuxVersion::parse_version_string("Linux version 4.2-yeah (gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
+            LinuxVersion::parse("Linux version 4.2-yeah (gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
             LinuxVersion {
                 major: 4,
                 minor: 2,
@@ -144,7 +144,7 @@ mod tests {
 
         // Both a flavour and a bugfix version
         assert_eq!(
-            LinuxVersion::parse_version_string("Linux version 4.2.9-wooo (gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
+            LinuxVersion::parse("Linux version 4.2.9-wooo (gralouf@yolo) #1 Sat May 14 01:51:54 UTC 2048"),
             LinuxVersion {
                 major: 4,
                 minor: 2,

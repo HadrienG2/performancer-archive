@@ -29,20 +29,7 @@ impl UptimeSampler {
     /// Acquire a new sample of uptime data
     pub fn sample(&mut self) -> Result<()> {
         let samples = &mut self.samples;
-        self.reader.sample(|file_contents: &str| {
-            // Parse all known file contents (simple enough for /proc/uptime :))
-            let mut numbers_iter = file_contents.split_whitespace();
-            samples.wall_clock_uptime.push(
-                parsers::parse_duration_secs(numbers_iter.next().unwrap())
-            );
-            samples.cpu_idle_time.push(
-                parsers::parse_duration_secs(numbers_iter.next().unwrap())
-            );
-
-            // If this debug assert fails, the contents of the file have been
-            // extended by a kernel revision, and the parser should be updated
-            debug_assert!(numbers_iter.next() == None);
-        })
+        self.reader.sample(|file_contents: &str| samples.push(file_contents))
     }
 
     // TODO: Add accessors to the inner uptime data + associated tests
@@ -66,6 +53,30 @@ impl UptimeData {
             cpu_idle_time: Vec::new(),
         }
     }
+
+    // Parse a sample from /proc/uptime and add it to the internal data store
+    fn push(&mut self, file_contents: &str) {
+        // Load machine uptime and idle time
+        let mut numbers_iter = file_contents.split_whitespace();
+        self.wall_clock_uptime.push(
+            parsers::parse_duration_secs(numbers_iter.next().unwrap())
+        );
+        self.cpu_idle_time.push(
+            parsers::parse_duration_secs(numbers_iter.next().unwrap())
+        );
+
+        // If this debug assert fails, the contents of the file have been
+        // extended by a kernel revision, and the parser should be updated
+        debug_assert!(numbers_iter.next().is_none(),
+                      "Unsupported entry found in /proc/uptime!");
+    }
+
+    // Tell how many samples are present in the data store
+    fn len(&self) -> usize {
+        let length = self.wall_clock_uptime.len();
+        debug_assert_eq!(length, self.cpu_idle_time.len());
+        length
+    }
 }
 
 
@@ -74,14 +85,34 @@ impl UptimeData {
 mod tests {
     use std::thread;
     use std::time::Duration;
-    use super::UptimeSampler;
-    
-    /// Check that no samples are initially present
+    use super::{UptimeData, UptimeSampler};
+
+    /// Check that creating an uptime data store works
     #[test]
-    fn new_sampler() {
+    fn init_uptime_data() {
+        let data = UptimeData::new();
+        assert_eq!(data.wall_clock_uptime.len(), 0);
+        assert_eq!(data.cpu_idle_time.len(), 0);
+        assert_eq!(data.len(), 0);
+    }
+
+    /// Check that parsing uptime data works
+    #[test]
+    fn parse_uptime_data() {
+        let mut data = UptimeData::new();
+        data.push("13.52 50.34");
+        assert_eq!(data.wall_clock_uptime.len(), 1);
+        assert_eq!(data.wall_clock_uptime[0], Duration::new(13, 520_000_000));
+        assert_eq!(data.cpu_idle_time.len(), 1);
+        assert_eq!(data.cpu_idle_time[0], Duration::new(50, 340_000_000));
+        assert_eq!(data.len(), 1);
+    }
+    
+    /// Check that initializing a sampler works
+    #[test]
+    fn init_sampler() {
         let uptime = UptimeSampler::new().unwrap();
-        assert_eq!(uptime.samples.wall_clock_uptime.len(), 0);
-        assert_eq!(uptime.samples.cpu_idle_time.len(), 0);
+        assert_eq!(uptime.samples.len(), 0);
     }
 
     /// Test that basic sampling works as expected
@@ -92,16 +123,14 @@ mod tests {
 
         // Acquire a first sample
         uptime.sample().unwrap();
-        assert_eq!(uptime.samples.wall_clock_uptime.len(), 1);
-        assert_eq!(uptime.samples.cpu_idle_time.len(), 1);
+        assert_eq!(uptime.samples.len(), 1);
 
         // Wait a bit
         thread::sleep(Duration::from_millis(50));
 
         // Acquire another sample
         uptime.sample().unwrap();
-        assert_eq!(uptime.samples.wall_clock_uptime.len(), 2);
-        assert_eq!(uptime.samples.cpu_idle_time.len(), 2);
+        assert_eq!(uptime.samples.len(), 2);
 
         // The uptime and idle time should have increased
         assert!(uptime.samples.wall_clock_uptime[1] >
