@@ -2,7 +2,6 @@
 
 use ::ProcFileReader;
 use chrono::{DateTime, TimeZone, Utc};
-use parsers::version::LINUX_VERSION;
 use std::io::Result;
 use std::time::Duration;
 
@@ -50,7 +49,7 @@ impl StatSampler {
 /// depending on kernel configuration, every entry of this struct is considered
 /// optional at this point.
 ///
-#[derive(Default)]
+#[derive(Debug, Default, PartialEq)]
 struct StatData {
     /// Total CPU usage stats, aggregated across all hardware threads
     all_cpus: Option<CPUStatData>,
@@ -187,6 +186,7 @@ impl StatData {
 
 
 /// The amount of CPU time that the system spent in various states
+#[derive(Clone, Debug, PartialEq)]
 struct CPUStatData {
     /// Time spent in user mode
     user_time: Vec<Duration>,
@@ -223,16 +223,9 @@ struct CPUStatData {
 impl CPUStatData {
     /// Create new CPU statistics
     fn new(num_timers: u8) -> Self {
-        // Check if we correctly detected all CPU timers
-        debug_assert!(
-            (LINUX_VERSION.smaller(2, 5, 41)    && (num_timers == 4)) ||
-            (LINUX_VERSION.smaller(2, 6, 0)     && (num_timers == 5)) ||
-            (LINUX_VERSION.smaller(2, 6, 11)    && (num_timers == 7)) ||
-            (LINUX_VERSION.smaller(2, 6, 24)    && (num_timers == 8)) ||
-            (LINUX_VERSION.smaller(2, 6, 33)    && (num_timers == 9)) ||
-            (LINUX_VERSION.greater_eq(2, 6, 33) && (num_timers == 10)),
-            "Unknown CPU timers detected!"
-        );
+        // Check if we know about all CPU timers
+        debug_assert!(num_timers >= 4, "Not expected from man 5 proc!");
+        debug_assert!(num_timers <= 10, "Unknown CPU timers detected!");
 
         // Conditionally create a certain amount of timing Vecs
         let mut created_vecs = 4;
@@ -262,27 +255,8 @@ impl CPUStatData {
 }
 
 
-/// Storage paging ativity statistics
-struct PagingStatData {
-    /// Number of RAM pages that were paged in from disk
-    incoming: Vec<u64>,
-
-    /// Number of RAM pages that were paged out to disk
-    outgoing: Vec<u64>,
-}
-//
-impl PagingStatData {
-    /// Create new paging statistics
-    fn new() -> Self {
-        Self {
-            incoming: Vec::new(),
-            outgoing: Vec::new(),
-        }
-    }
-}
-
-
 /// Interrupt statistics from /proc/stat, in structure-of-array layout
+#[derive(Debug, PartialEq)]
 struct InterruptStatData {
     /// Total number of interrupts that were serviced. May be higher than the
     /// sum of the breakdown below if there are unnumbered interrupt sources.
@@ -303,15 +277,175 @@ impl InterruptStatData {
 }
 
 
+/// Storage paging ativity statistics
+#[derive(Debug, PartialEq)]
+struct PagingStatData {
+    /// Number of RAM pages that were paged in from disk
+    incoming: Vec<u64>,
+
+    /// Number of RAM pages that were paged out to disk
+    outgoing: Vec<u64>,
+}
+//
+impl PagingStatData {
+    /// Create new paging statistics
+    fn new() -> Self {
+        Self {
+            incoming: Vec::new(),
+            outgoing: Vec::new(),
+        }
+    }
+}
+
+
 /// These are the unit tests for this module
 #[cfg(test)]
 mod tests {
-    use std::thread;
-    use std::time::Duration;
-    use super::StatSampler;
+    use chrono::{TimeZone, Utc};
+    use super::{CPUStatData, InterruptStatData, PagingStatData, StatData};
 
-    // TODO: Add a big, big initialization test
-    
+    // Check that CPU statistics initialization works as expected
+    #[test]
+    fn init_cpu_stat() {
+        // Oldest known CPU stats format from Linux 4.11's man proc
+        let oldest_stats = CPUStatData::new(4);
+        assert_eq!(oldest_stats.user_time.len(), 0);
+        assert_eq!(oldest_stats.nice_time.len(), 0);
+        assert_eq!(oldest_stats.system_time.len(), 0);
+        assert_eq!(oldest_stats.idle_time.len(), 0);
+        assert!(oldest_stats.io_wait_time.is_none());
+        assert!(oldest_stats.guest_nice_time.is_none());
+
+        // First known CPU stats extension from Linux 4.11's man proc
+        let first_ext_stats = CPUStatData::new(5);
+        assert_eq!(first_ext_stats.io_wait_time, Some(Vec::new()));
+        assert!(first_ext_stats.irq_time.is_none());
+        assert!(first_ext_stats.guest_nice_time.is_none());
+
+        // Newest known CPU stats format from Linux 4.11's man proc
+        let latest_stats = CPUStatData::new(10);
+        assert_eq!(latest_stats.io_wait_time, Some(Vec::new()));
+        assert_eq!(latest_stats.guest_nice_time, Some(Vec::new()));
+    }
+
+    // Check that interrupt statistics initialization works as expected
+    #[test]
+    fn init_interrupt_stat() {
+        // Check that interrupt statistics without any details work
+        let no_details_stats = InterruptStatData::new(0);
+        assert_eq!(no_details_stats.total.len(), 0);
+        assert_eq!(no_details_stats.details.len(), 0);
+
+        // Check that interrupt statistics with two detailed counters work
+        let no_details_stats = InterruptStatData::new(2);
+        assert_eq!(no_details_stats.details.len(), 2);
+        assert_eq!(no_details_stats.details[0].len(), 0);
+        assert_eq!(no_details_stats.details[1].len(), 0);
+
+        // Check that interrupt statistics with lots of detailed counters work
+        let no_details_stats = InterruptStatData::new(256);
+        assert_eq!(no_details_stats.details.len(), 256);
+        assert_eq!(no_details_stats.details[0].len(), 0);
+        assert_eq!(no_details_stats.details[255].len(), 0);
+    }
+
+    // Check that paging statistics initialization works as expected
+    #[test]
+    fn init_paging_stat() {
+        // Check that paging statistics initialization works
+        let stats = PagingStatData::new();
+        assert_eq!(stats.incoming.len(), 0);
+        assert_eq!(stats.outgoing.len(), 0);
+    }
+
+    // Check that statistical data initialization works as expected
+    #[test]
+    fn init_stat_data() {
+        // Starting with an empty file (should never happen, but good base case)
+        let mut stats = String::new();
+        let empty_stats = StatData::new(&stats);
+        assert!(empty_stats.all_cpus.is_none());
+        assert!(empty_stats.each_cpu.is_none());
+        assert!(empty_stats.paging.is_none());
+        assert!(empty_stats.swapping.is_none());
+        assert!(empty_stats.interrupts.is_none());
+        assert!(empty_stats.context_switches.is_none());
+        assert!(empty_stats.boot_time.is_none());
+        assert!(empty_stats.process_forks.is_none());
+        assert!(empty_stats.runnable_processes.is_none());
+        assert!(empty_stats.blocked_processes.is_none());
+        assert!(empty_stats.softirqs.is_none());
+        let mut expected = empty_stats;
+
+        // ...adding global CPU stats
+        stats.push_str("cpu 1 2 3 4");
+        let global_cpu_stats = StatData::new(&stats);
+        expected.all_cpus = Some(CPUStatData::new(4));
+        assert_eq!(global_cpu_stats, expected);
+
+        // ...adding dual-core CPU stats
+        stats.push_str("\ncpu0 0 1 1 3
+                          cpu1 1 1 2 1");
+        let local_cpu_stats = StatData::new(&stats);
+        expected.each_cpu = Some(vec![CPUStatData::new(4); 2]);
+        assert_eq!(local_cpu_stats, expected);
+
+        // ...adding paging stats
+        stats.push_str("\npage 42 43");
+        let paging_stats = StatData::new(&stats);
+        expected.paging = Some(PagingStatData::new());
+        assert_eq!(paging_stats, expected);
+
+        // ...adding swapping stats
+        stats.push_str("\nswap 24 34");
+        let swapping_stats = StatData::new(&stats);
+        expected.swapping = Some(PagingStatData::new());
+        assert_eq!(swapping_stats, expected);
+
+        // ...adding interrupt stats
+        stats.push_str("\nintr 12345 678 910");
+        let interrupt_stats = StatData::new(&stats);
+        expected.interrupts = Some(InterruptStatData::new(2));
+        assert_eq!(interrupt_stats, expected);
+
+        // ...adding context switches
+        stats.push_str("\nctxt 654321");
+        let context_stats = StatData::new(&stats);
+        expected.context_switches = Some(Vec::new());
+        assert_eq!(context_stats, expected);
+
+        // ...adding boot time
+        stats.push_str("\nbtime 5738295");
+        let boot_time_stats = StatData::new(&stats);
+        expected.boot_time = Some(Utc.timestamp(5738295, 0));
+        assert_eq!(boot_time_stats, expected);
+
+        // ...adding process fork counter
+        stats.push_str("\nprocesses 94536551");
+        let process_fork_stats = StatData::new(&stats);
+        expected.process_forks = Some(Vec::new());
+        assert_eq!(process_fork_stats, expected);
+
+        // ...adding runnable process counter
+        stats.push_str("\nprocs_running 1624");
+        let runnable_process_stats = StatData::new(&stats);
+        expected.runnable_processes = Some(Vec::new());
+        assert_eq!(runnable_process_stats, expected);
+
+        // ...adding blocked process counter
+        stats.push_str("\nprocs_blocked 8948");
+        let blocked_process_stats = StatData::new(&stats);
+        expected.blocked_processes = Some(Vec::new());
+        assert_eq!(blocked_process_stats, expected);
+
+        // ...adding softirq stats
+        stats.push_str("\nsoftirq 94651 1561 21211 12 71867");
+        let softirq_stats = StatData::new(&stats);
+        expected.softirqs = Some(InterruptStatData::new(4));
+        assert_eq!(softirq_stats, expected);
+    }
+
+    /* TODO: Restore this
     /// Check that no samples are initially present
     #[test]
     fn new_sampler() {
@@ -319,9 +453,10 @@ mod tests {
         unimplemented!();
         /* assert_eq!(uptime.samples.wall_clock_uptime.len(), 0);
         assert_eq!(uptime.samples.cpu_idle_time.len(), 0); */
-    }
+    } */
 
-    /* /// Test that basic sampling works as expected
+    /* TODO: Restore this 
+    /// Test that basic sampling works as expected
     #[test]
     fn basic_sampling() {
         // Create an uptime sampler
@@ -369,6 +504,7 @@ mod benchmarks {
         });
     }
 
+    /* TODO: Restore this
     /// Benchmark for the full stat sampling overhead
     #[test]
     #[ignore]
@@ -377,5 +513,5 @@ mod benchmarks {
         testbench::benchmark(100_000, || {
             stat.sample().unwrap();
         });
-    }
+    } */
 }
