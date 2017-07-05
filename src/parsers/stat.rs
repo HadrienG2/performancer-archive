@@ -102,7 +102,7 @@ struct StatData {
     /// kernel configuration (and thus the layout of /proc/stat) will not change
     /// over the course of a series of sampling measurements.
     ///
-    line_to_member: Vec<StatDataMember>,
+    line_target: Vec<StatDataMember>,
 }
 //
 impl StatData {
@@ -126,7 +126,7 @@ impl StatData {
                 "cpu" => {
                     num_cpu_timers = whitespace_iter.count() as u8;
                     data.all_cpus = Some(CPUStatData::new(num_cpu_timers));
-                    data.line_to_member.push(StatDataMember::AllCPUs);
+                    data.line_target.push(StatDataMember::AllCPUs);
                 }
 
                 // Statistics on a specific CPU thread
@@ -142,20 +142,20 @@ impl StatData {
                     // Add one thread-specific entry to the list
                     if let Some(ref mut cpu_vec) = data.each_cpu {
                         cpu_vec.push(CPUStatData::new(num_cpu_timers));
-                        data.line_to_member.push(StatDataMember::EachCPU);
+                        data.line_target.push(StatDataMember::EachCPU);
                     }
                 },
 
                 // Paging statistics
                 "page" => {
                     data.paging = Some(PagingStatData::new());
-                    data.line_to_member.push(StatDataMember::Paging);
+                    data.line_target.push(StatDataMember::Paging);
                 },
 
                 // Swapping statistics
                 "swap" => {
                     data.swapping = Some(PagingStatData::new());
-                    data.line_to_member.push(StatDataMember::Swapping);
+                    data.line_target.push(StatDataMember::Swapping);
                 },
 
                 // Hardware interrupt statistics
@@ -164,13 +164,13 @@ impl StatData {
                     data.interrupts = Some(
                         InterruptStatData::new(num_interrupts)
                     );
-                    data.line_to_member.push(StatDataMember::Interrupts);
+                    data.line_target.push(StatDataMember::Interrupts);
                 },
 
                 // Context switch statistics
                 "ctxt" => {
                     data.context_switches = Some(Vec::new());
-                    data.line_to_member.push(StatDataMember::ContextSwitches);
+                    data.line_target.push(StatDataMember::ContextSwitches);
                 },
 
                 // Boot time
@@ -180,25 +180,25 @@ impl StatData {
                     data.boot_time = Some(
                         Utc.timestamp(btime_str.parse().unwrap(), 0)
                     );
-                    data.line_to_member.push(StatDataMember::BootTime);
+                    data.line_target.push(StatDataMember::BootTime);
                 },
 
                 // Number of process forks since boot
                 "processes" => {
                     data.process_forks = Some(Vec::new());
-                    data.line_to_member.push(StatDataMember::ProcessForks);
+                    data.line_target.push(StatDataMember::ProcessForks);
                 },
 
                 // Number of processes in the runnable state
                 "procs_running" => {
                     data.runnable_processes = Some(Vec::new());
-                    data.line_to_member.push(StatDataMember::RunnableProcesses);
+                    data.line_target.push(StatDataMember::RunnableProcesses);
                 },
 
                 // Number of processes waiting for I/O
                 "procs_blocked" => {
                     data.blocked_processes = Some(Vec::new());
-                    data.line_to_member.push(StatDataMember::BlockedProcesses);
+                    data.line_target.push(StatDataMember::BlockedProcesses);
                 },
 
                 // Softirq statistics
@@ -207,7 +207,7 @@ impl StatData {
                     data.softirqs = Some(
                         InterruptStatData::new(num_interrupts)
                     );
-                    data.line_to_member.push(StatDataMember::SoftIRQs);
+                    data.line_target.push(StatDataMember::SoftIRQs);
                 },
 
                 // Something we do not support yet? We should!
@@ -215,13 +215,88 @@ impl StatData {
                     debug_assert!(false,
                                   "Unsupported entry '{}' detected!",
                                   unknown_header);
-                    data.line_to_member.push(StatDataMember::Unsupported);
+                    data.line_target.push(StatDataMember::Unsupported);
                 }
             }
         }
 
         // Return our data collection setup
         data
+    }
+
+    /// Parse the contents of /proc/stat and add a data sample to all
+    /// corresponding entries in the internal data store
+    fn push(&mut self, file_contents: &str) {
+        // This will help us count hardware threads to know which one we are
+        // currently talking about.
+        let mut curr_thread = 0;
+
+        // This time, we know how lines of /proc/stat map to our members
+        for (line, member) in file_contents.lines()
+                                           .zip(self.line_target.iter()) {
+            // The beginning of parsing is the same as before: split by spaces.
+            // But this time, we discard the header, as we already know it.
+            let mut contents_iter = line.split_whitespace();
+            contents_iter.next();
+
+            // Forward the /proc/stat data to the appropriate member
+            use self::StatDataMember::*;
+            match *member {
+                AllCPUs  => {
+                    let all_cpus = self.all_cpus.as_mut().unwrap();
+                    all_cpus.push(contents_iter);
+                },
+                EachCPU  => {
+                    let each_cpu = self.each_cpu.as_mut().unwrap();
+                    each_cpu[curr_thread].push(contents_iter);
+                    curr_thread += 1;
+                },
+                Paging   => {
+                    let paging = self.paging.as_mut().unwrap();
+                    paging.push(contents_iter);
+                },
+                Swapping => {
+                    let swapping = self.swapping.as_mut().unwrap();
+                    swapping.push(contents_iter);
+                },
+                Interrupts => {
+                    let interrupts = self.interrupts.as_mut().unwrap();
+                    interrupts.push(contents_iter);
+                },
+                ContextSwitches => {
+                    let context_switches = self.context_switches.as_mut()
+                                                                .unwrap();
+                    context_switches.push(contents_iter.next().unwrap()
+                                                       .parse().unwrap());
+                    debug_assert!(contents_iter.next().is_none());
+                },
+                ProcessForks => {
+                    let process_forks = self.process_forks.as_mut().unwrap();
+                    process_forks.push(contents_iter.next().unwrap()
+                                                    .parse().unwrap());
+                    debug_assert!(contents_iter.next().is_none());
+                },
+                RunnableProcesses => {
+                    let runnable_processes = self.runnable_processes.as_mut()
+                                                                    .unwrap();
+                    runnable_processes.push(contents_iter.next().unwrap()
+                                                         .parse().unwrap());
+                    debug_assert!(contents_iter.next().is_none());
+                },
+                BlockedProcesses => {
+                    let blocked_processes = self.blocked_processes.as_mut()
+                                                                  .unwrap();
+                    blocked_processes.push(contents_iter.next().unwrap()
+                                                        .parse().unwrap());
+                    debug_assert!(contents_iter.next().is_none());
+                },
+                SoftIRQs => {
+                    let softirqs = self.softirqs.as_mut().unwrap();
+                    softirqs.push(contents_iter);
+                }
+                BootTime | Unsupported => {},
+            }
+        }
     }
 }
 //
@@ -575,7 +650,7 @@ mod tests {
         stats.push_str("cpu 1 2 3 4");
         let global_cpu_stats = StatData::new(&stats);
         expected.all_cpus = Some(CPUStatData::new(4));
-        expected.line_to_member.push(StatDataMember::AllCPUs);
+        expected.line_target.push(StatDataMember::AllCPUs);
         assert_eq!(global_cpu_stats, expected);
 
         // ...adding dual-core CPU stats
@@ -583,71 +658,71 @@ mod tests {
                           cpu1 1 1 2 1");
         let local_cpu_stats = StatData::new(&stats);
         expected.each_cpu = Some(vec![CPUStatData::new(4); 2]);
-        expected.line_to_member.push(StatDataMember::EachCPU);
-        expected.line_to_member.push(StatDataMember::EachCPU);
+        expected.line_target.push(StatDataMember::EachCPU);
+        expected.line_target.push(StatDataMember::EachCPU);
         assert_eq!(local_cpu_stats, expected);
 
         // ...adding paging stats
         stats.push_str("\npage 42 43");
         let paging_stats = StatData::new(&stats);
         expected.paging = Some(PagingStatData::new());
-        expected.line_to_member.push(StatDataMember::Paging);
+        expected.line_target.push(StatDataMember::Paging);
         assert_eq!(paging_stats, expected);
 
         // ...adding swapping stats
         stats.push_str("\nswap 24 34");
         let swapping_stats = StatData::new(&stats);
         expected.swapping = Some(PagingStatData::new());
-        expected.line_to_member.push(StatDataMember::Swapping);
+        expected.line_target.push(StatDataMember::Swapping);
         assert_eq!(swapping_stats, expected);
 
         // ...adding interrupt stats
         stats.push_str("\nintr 12345 678 910");
         let interrupt_stats = StatData::new(&stats);
         expected.interrupts = Some(InterruptStatData::new(2));
-        expected.line_to_member.push(StatDataMember::Interrupts);
+        expected.line_target.push(StatDataMember::Interrupts);
         assert_eq!(interrupt_stats, expected);
 
         // ...adding context switches
         stats.push_str("\nctxt 654321");
         let context_stats = StatData::new(&stats);
         expected.context_switches = Some(Vec::new());
-        expected.line_to_member.push(StatDataMember::ContextSwitches);
+        expected.line_target.push(StatDataMember::ContextSwitches);
         assert_eq!(context_stats, expected);
 
         // ...adding boot time
         stats.push_str("\nbtime 5738295");
         let boot_time_stats = StatData::new(&stats);
         expected.boot_time = Some(Utc.timestamp(5738295, 0));
-        expected.line_to_member.push(StatDataMember::BootTime);
+        expected.line_target.push(StatDataMember::BootTime);
         assert_eq!(boot_time_stats, expected);
 
         // ...adding process fork counter
         stats.push_str("\nprocesses 94536551");
         let process_fork_stats = StatData::new(&stats);
         expected.process_forks = Some(Vec::new());
-        expected.line_to_member.push(StatDataMember::ProcessForks);
+        expected.line_target.push(StatDataMember::ProcessForks);
         assert_eq!(process_fork_stats, expected);
 
         // ...adding runnable process counter
         stats.push_str("\nprocs_running 1624");
         let runnable_process_stats = StatData::new(&stats);
         expected.runnable_processes = Some(Vec::new());
-        expected.line_to_member.push(StatDataMember::RunnableProcesses);
+        expected.line_target.push(StatDataMember::RunnableProcesses);
         assert_eq!(runnable_process_stats, expected);
 
         // ...adding blocked process counter
         stats.push_str("\nprocs_blocked 8948");
         let blocked_process_stats = StatData::new(&stats);
         expected.blocked_processes = Some(Vec::new());
-        expected.line_to_member.push(StatDataMember::BlockedProcesses);
+        expected.line_target.push(StatDataMember::BlockedProcesses);
         assert_eq!(blocked_process_stats, expected);
 
         // ...adding softirq stats
         stats.push_str("\nsoftirq 94651 1561 21211 12 71867");
         let softirq_stats = StatData::new(&stats);
         expected.softirqs = Some(InterruptStatData::new(4));
-        expected.line_to_member.push(StatDataMember::SoftIRQs);
+        expected.line_target.push(StatDataMember::SoftIRQs);
         assert_eq!(softirq_stats, expected);
     }
 
