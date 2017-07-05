@@ -259,23 +259,20 @@ impl StatData {
                     interrupts.push(contents_iter);
                 },
                 StatDataMember::ContextSwitches => {
-                    let context_switches = self.context_switches.as_mut()
-                                                                .unwrap();
-                    Self::push_scalar(context_switches, contents_iter);
+                    Self::push_sample(&mut self.context_switches,
+                                      contents_iter);
                 },
                 StatDataMember::ProcessForks => {
-                    let process_forks = self.process_forks.as_mut().unwrap();
-                    Self::push_scalar(process_forks, contents_iter);
+                    Self::push_sample(&mut self.process_forks,
+                                      contents_iter);
                 },
                 StatDataMember::RunnableProcesses => {
-                    let runnable_processes = self.runnable_processes.as_mut()
-                                                                    .unwrap();
-                    Self::push_scalar(runnable_processes, contents_iter);
+                    Self::push_sample(&mut self.runnable_processes,
+                                      contents_iter);
                 },
                 StatDataMember::BlockedProcesses => {
-                    let blocked_processes = self.blocked_processes.as_mut()
-                                                                  .unwrap();
-                    Self::push_scalar(blocked_processes, contents_iter);
+                    Self::push_sample(&mut self.blocked_processes,
+                                      contents_iter);
                 },
                 StatDataMember::SoftIRQs => {
                     let softirqs = self.softirqs.as_mut().unwrap();
@@ -290,12 +287,14 @@ impl StatData {
     }
 
     // INTERNAL: This is a basic stat parser for primitive types
-    // TODO: Replace that with a parsing trait
-    fn push_scalar<T, U>(target: &mut Vec<T>, mut stats: SplitWhitespace)
+    // TODO: Complement that with a parsing trait
+    fn push_sample<T, U>(target: &mut Option<Vec<T>>,
+                         mut stats: SplitWhitespace)
         where T: FromStr<Err=U>,
               U: Debug
     {
-        target.push(stats.next().unwrap().parse().unwrap());
+        let vec = target.as_mut().unwrap();
+        vec.push(stats.next().unwrap().parse().unwrap());
         debug_assert!(stats.next().is_none());
     }
 }
