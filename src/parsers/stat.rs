@@ -731,6 +731,10 @@ mod tests {
         assert_eq!(softirq_stats, expected);
     }
 
+    // TODO: Add scalar parser test (on top)
+    // TODO: Add final parser test
+    // TODO: Add sampler tests (init & sampling)
+
     /* TODO: Restore this
     /// Check that no samples are initially present
     #[test]
