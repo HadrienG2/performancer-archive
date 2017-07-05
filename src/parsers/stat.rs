@@ -50,7 +50,7 @@ impl StatSampler {
 /// Courtesy of Linux's total lack of promises regarding the variability of
 /// /proc/stat across hardware architectures, or even on a given system
 /// depending on kernel configuration, every entry of this struct is considered
-/// optional at this point.
+/// optional at this point...
 ///
 #[derive(Debug, Default, PartialEq)]
 struct StatData {
@@ -91,6 +91,18 @@ struct StatData {
     /// same layout as hardware interrupt stats, where softirqs are enumerated
     /// in the same order as in /proc/softirq.
     softirqs: Option<InterruptStatData>,
+
+    /// This vector indicates how each line of /proc/stat maps to the members of
+    /// this struct. It basically is a legal and move-friendly variant of the
+    /// obvious alternative of making every XyzStatData struct implement some
+    /// StatDataParser trait and then using a Vec<&mut StatDataParser>.
+    ///
+    /// The idea of mapping lines of /proc/stat to struct members builds on the
+    /// assumption, which we make in other places in this library, that the
+    /// kernel configuration (and thus the layout of /proc/stat) will not change
+    /// over the course of a series of sampling measurements.
+    ///
+    line_to_member: Vec<StatDataMember>,
 }
 //
 impl StatData {
@@ -114,12 +126,13 @@ impl StatData {
                 "cpu" => {
                     num_cpu_timers = whitespace_iter.count() as u8;
                     data.all_cpus = Some(CPUStatData::new(num_cpu_timers));
+                    data.line_to_member.push(StatDataMember::AllCPUs);
                 }
 
                 // Statistics on a specific CPU thread
                 header if &header[0..3] == "cpu" => {
                     // If we didn't know, note that we have per-thread data and
-                    // check for data format consistency with global CPU stats
+                    // check data format consistency with global CPU stats
                     if data.each_cpu.is_none() {
                         assert_eq!(whitespace_iter.count() as u8,
                                    num_cpu_timers);
@@ -129,14 +142,21 @@ impl StatData {
                     // Add one thread-specific entry to the list
                     if let Some(ref mut cpu_vec) = data.each_cpu {
                         cpu_vec.push(CPUStatData::new(num_cpu_timers));
+                        data.line_to_member.push(StatDataMember::EachCPU);
                     }
                 },
 
                 // Paging statistics
-                "page" => data.paging = Some(PagingStatData::new()),
+                "page" => {
+                    data.paging = Some(PagingStatData::new());
+                    data.line_to_member.push(StatDataMember::Paging);
+                },
 
                 // Swapping statistics
-                "swap" => data.swapping = Some(PagingStatData::new()),
+                "swap" => {
+                    data.swapping = Some(PagingStatData::new());
+                    data.line_to_member.push(StatDataMember::Swapping);
+                },
 
                 // Hardware interrupt statistics
                 "intr" => {
@@ -144,10 +164,14 @@ impl StatData {
                     data.interrupts = Some(
                         InterruptStatData::new(num_interrupts)
                     );
+                    data.line_to_member.push(StatDataMember::Interrupts);
                 },
 
                 // Context switch statistics
-                "ctxt" => data.context_switches = Some(Vec::new()),
+                "ctxt" => {
+                    data.context_switches = Some(Vec::new());
+                    data.line_to_member.push(StatDataMember::ContextSwitches);
+                },
 
                 // Boot time
                 "btime" => {
@@ -156,16 +180,26 @@ impl StatData {
                     data.boot_time = Some(
                         Utc.timestamp(btime_str.parse().unwrap(), 0)
                     );
+                    data.line_to_member.push(StatDataMember::BootTime);
                 },
 
                 // Number of process forks since boot
-                "processes" => data.process_forks = Some(Vec::new()),
+                "processes" => {
+                    data.process_forks = Some(Vec::new());
+                    data.line_to_member.push(StatDataMember::ProcessForks);
+                },
 
                 // Number of processes in the runnable state
-                "procs_running" => data.runnable_processes = Some(Vec::new()),
+                "procs_running" => {
+                    data.runnable_processes = Some(Vec::new());
+                    data.line_to_member.push(StatDataMember::RunnableProcesses);
+                },
 
                 // Number of processes waiting for I/O
-                "procs_blocked" => data.blocked_processes = Some(Vec::new()),
+                "procs_blocked" => {
+                    data.blocked_processes = Some(Vec::new());
+                    data.line_to_member.push(StatDataMember::BlockedProcesses);
+                },
 
                 // Softirq statistics
                 "softirq" => {
@@ -173,6 +207,7 @@ impl StatData {
                     data.softirqs = Some(
                         InterruptStatData::new(num_interrupts)
                     );
+                    data.line_to_member.push(StatDataMember::SoftIRQs);
                 },
 
                 // Something we do not support yet? We should!
@@ -180,6 +215,7 @@ impl StatData {
                     debug_assert!(false,
                                   "Unsupported entry '{}' detected!",
                                   unknown_header);
+                    data.line_to_member.push(StatDataMember::Unsupported);
                 }
             }
         }
@@ -187,6 +223,27 @@ impl StatData {
         // Return our data collection setup
         data
     }
+}
+//
+// This enum should be kept in sync with the definition of StatData
+//
+#[derive(Debug, PartialEq)]
+enum StatDataMember {
+    // Data storage elements of StatData
+    AllCPUs,
+    EachCPU,
+    Paging,
+    Swapping,
+    Interrupts,
+    ContextSwitches,
+    BootTime,
+    ProcessForks,
+    RunnableProcesses,
+    BlockedProcesses,
+    SoftIRQs,
+
+    // Special entry for unsupported fields of /proc/stat
+    Unsupported
 }
 
 
@@ -381,7 +438,8 @@ impl PagingStatData {
 mod tests {
     use chrono::{TimeZone, Utc};
     use std::time::Duration;
-    use super::{CPUStatData, InterruptStatData, PagingStatData, StatData};
+    use super::{CPUStatData, InterruptStatData, PagingStatData, StatData,
+                StatDataMember};
 
     // Check that CPU statistics initialization works as expected
     #[test]
@@ -517,6 +575,7 @@ mod tests {
         stats.push_str("cpu 1 2 3 4");
         let global_cpu_stats = StatData::new(&stats);
         expected.all_cpus = Some(CPUStatData::new(4));
+        expected.line_to_member.push(StatDataMember::AllCPUs);
         assert_eq!(global_cpu_stats, expected);
 
         // ...adding dual-core CPU stats
@@ -524,60 +583,71 @@ mod tests {
                           cpu1 1 1 2 1");
         let local_cpu_stats = StatData::new(&stats);
         expected.each_cpu = Some(vec![CPUStatData::new(4); 2]);
+        expected.line_to_member.push(StatDataMember::EachCPU);
+        expected.line_to_member.push(StatDataMember::EachCPU);
         assert_eq!(local_cpu_stats, expected);
 
         // ...adding paging stats
         stats.push_str("\npage 42 43");
         let paging_stats = StatData::new(&stats);
         expected.paging = Some(PagingStatData::new());
+        expected.line_to_member.push(StatDataMember::Paging);
         assert_eq!(paging_stats, expected);
 
         // ...adding swapping stats
         stats.push_str("\nswap 24 34");
         let swapping_stats = StatData::new(&stats);
         expected.swapping = Some(PagingStatData::new());
+        expected.line_to_member.push(StatDataMember::Swapping);
         assert_eq!(swapping_stats, expected);
 
         // ...adding interrupt stats
         stats.push_str("\nintr 12345 678 910");
         let interrupt_stats = StatData::new(&stats);
         expected.interrupts = Some(InterruptStatData::new(2));
+        expected.line_to_member.push(StatDataMember::Interrupts);
         assert_eq!(interrupt_stats, expected);
 
         // ...adding context switches
         stats.push_str("\nctxt 654321");
         let context_stats = StatData::new(&stats);
         expected.context_switches = Some(Vec::new());
+        expected.line_to_member.push(StatDataMember::ContextSwitches);
         assert_eq!(context_stats, expected);
 
         // ...adding boot time
         stats.push_str("\nbtime 5738295");
         let boot_time_stats = StatData::new(&stats);
         expected.boot_time = Some(Utc.timestamp(5738295, 0));
+        expected.line_to_member.push(StatDataMember::BootTime);
         assert_eq!(boot_time_stats, expected);
 
         // ...adding process fork counter
         stats.push_str("\nprocesses 94536551");
         let process_fork_stats = StatData::new(&stats);
         expected.process_forks = Some(Vec::new());
+        expected.line_to_member.push(StatDataMember::ProcessForks);
         assert_eq!(process_fork_stats, expected);
 
         // ...adding runnable process counter
         stats.push_str("\nprocs_running 1624");
         let runnable_process_stats = StatData::new(&stats);
         expected.runnable_processes = Some(Vec::new());
+        expected.line_to_member.push(StatDataMember::RunnableProcesses);
         assert_eq!(runnable_process_stats, expected);
 
         // ...adding blocked process counter
         stats.push_str("\nprocs_blocked 8948");
         let blocked_process_stats = StatData::new(&stats);
         expected.blocked_processes = Some(Vec::new());
+        expected.line_to_member.push(StatDataMember::BlockedProcesses);
         assert_eq!(blocked_process_stats, expected);
 
         // ...adding softirq stats
         stats.push_str("\nsoftirq 94651 1561 21211 12 71867");
         let softirq_stats = StatData::new(&stats);
         expected.softirqs = Some(InterruptStatData::new(4));
+        expected.line_to_member.push(StatDataMember::SoftIRQs);
         assert_eq!(softirq_stats, expected);
     }
 
