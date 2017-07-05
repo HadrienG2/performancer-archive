@@ -128,15 +128,17 @@ impl StatData {
 
             // ...and check the header
             match whitespace_iter.next().unwrap() {
-                // Statistics on all CPUs, should come first
+                // Statistics on all CPUs (should come first)
                 "cpu" => {
                     num_cpu_timers = whitespace_iter.count() as u8;
                     data.all_cpus = Some(CPUStatData::new(num_cpu_timers));
                     data.line_target.push(StatDataMember::AllCPUs);
                 }
 
-                // Statistics on a specific CPU thread
+                // Statistics on a specific CPU thread (should be consistent
+                // with the global stats and come after them)
                 header if &header[0..3] == "cpu" => {
+                    assert_eq!(whitespace_iter.count() as u8, num_cpu_timers);
                     data.each_cpu.push(CPUStatData::new(num_cpu_timers));
                     data.line_target.push(StatDataMember::EachCPU);
                 },
@@ -222,9 +224,8 @@ impl StatData {
     /// Parse the contents of /proc/stat and add a data sample to all
     /// corresponding entries in the internal data store
     fn push(&mut self, file_contents: &str) {
-        // This will help us count hardware threads to know which one we are
-        // currently talking about.
-        let mut curr_thread = 0;
+        // This is the hardware CPU thread which we are currently considering
+        let mut cpu_iter = self.each_cpu.iter_mut();
 
         // This time, we know how lines of /proc/stat map to our members
         for (line, member) in file_contents.lines()
@@ -244,8 +245,7 @@ impl StatData {
                     all_cpus.push(contents_iter);
                 },
                 EachCPU  => {
-                    self.each_cpu[curr_thread].push(contents_iter);
-                    curr_thread += 1;
+                    cpu_iter.next().unwrap().push(contents_iter);
                 },
                 Paging   => {
                     let paging = self.paging.as_mut().unwrap();
@@ -285,6 +285,9 @@ impl StatData {
                 BootTime | Unsupported => {},
             }
         }
+
+        // At the end of parsing, all CPU threads should have been considered
+        debug_assert!(cpu_iter.next().is_none());
     }
 
     // INTERNAL: This is a basic stat parser for primitive types
