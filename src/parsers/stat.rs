@@ -239,14 +239,14 @@ impl StatData {
             // TODO: Simplify this by the power of traits (requires using a
             //       similar logic for EachCPU and for scalar quantities)
             match *member {
-                StatDataMember::AllCPUs  => {
+                StatDataMember::AllCPUs => {
                     let all_cpus = self.all_cpus.as_mut().unwrap();
                     all_cpus.push(contents_iter);
                 },
-                StatDataMember::EachCPU  => {
+                StatDataMember::EachCPU => {
                     cpu_iter.next().unwrap().push(contents_iter);
                 },
-                StatDataMember::Paging   => {
+                StatDataMember::Paging => {
                     let paging = self.paging.as_mut().unwrap();
                     paging.push(contents_iter);
                 },
