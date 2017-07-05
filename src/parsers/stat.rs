@@ -238,51 +238,50 @@ impl StatData {
             // Forward the /proc/stat data to the appropriate parser
             // TODO: Simplify this by the power of traits (requires using a
             //       similar logic for EachCPU and for scalar quantities)
-            use self::StatDataMember::*;
             match *member {
-                AllCPUs  => {
+                StatDataMember::AllCPUs  => {
                     let all_cpus = self.all_cpus.as_mut().unwrap();
                     all_cpus.push(contents_iter);
                 },
-                EachCPU  => {
+                StatDataMember::EachCPU  => {
                     cpu_iter.next().unwrap().push(contents_iter);
                 },
-                Paging   => {
+                StatDataMember::Paging   => {
                     let paging = self.paging.as_mut().unwrap();
                     paging.push(contents_iter);
                 },
-                Swapping => {
+                StatDataMember::Swapping => {
                     let swapping = self.swapping.as_mut().unwrap();
                     swapping.push(contents_iter);
                 },
-                Interrupts => {
+                StatDataMember::Interrupts => {
                     let interrupts = self.interrupts.as_mut().unwrap();
                     interrupts.push(contents_iter);
                 },
-                ContextSwitches => {
+                StatDataMember::ContextSwitches => {
                     let context_switches = self.context_switches.as_mut()
                                                                 .unwrap();
                     Self::push_scalar(context_switches, contents_iter);
                 },
-                ProcessForks => {
+                StatDataMember::ProcessForks => {
                     let process_forks = self.process_forks.as_mut().unwrap();
                     Self::push_scalar(process_forks, contents_iter);
                 },
-                RunnableProcesses => {
+                StatDataMember::RunnableProcesses => {
                     let runnable_processes = self.runnable_processes.as_mut()
                                                                     .unwrap();
                     Self::push_scalar(runnable_processes, contents_iter);
                 },
-                BlockedProcesses => {
+                StatDataMember::BlockedProcesses => {
                     let blocked_processes = self.blocked_processes.as_mut()
                                                                   .unwrap();
                     Self::push_scalar(blocked_processes, contents_iter);
                 },
-                SoftIRQs => {
+                StatDataMember::SoftIRQs => {
                     let softirqs = self.softirqs.as_mut().unwrap();
                     softirqs.push(contents_iter);
                 }
-                BootTime | Unsupported => {},
+                StatDataMember::BootTime | StatDataMember::Unsupported => {},
             }
         }
 
@@ -291,6 +290,7 @@ impl StatData {
     }
 
     // INTERNAL: This is a basic stat parser for primitive types
+    // TODO: Replace that with a parsing trait
     fn push_scalar<T, U>(target: &mut Vec<T>, mut stats: SplitWhitespace)
         where T: FromStr<Err=U>,
               U: Debug
