@@ -35,6 +35,7 @@ impl StatSampler {
         let samples = &mut self.samples;
         self.reader.sample(|file_contents: &str| {
             // TODO: Parse the contents of /proc/stat, add debug_asserts for unknown entries
+            unimplemented!();
         })
     }
 
@@ -84,10 +85,10 @@ struct StatData {
     /// Number of processes blocked waiting for I/O (since Linux 2.5.45)
     blocked_processes: Option<Vec<u16>>,
 
-    /// Statistics on the number of soft-irqs that were serviced. These use the
-    /// same layout as hardware interrupt stats, where soft-irqs are enumerated
+    /// Statistics on the number of softirqs that were serviced. These use the
+    /// same layout as hardware interrupt stats, where softirqs are enumerated
     /// in the same order as in /proc/softirq.
-    soft_irqs: Option<InterruptStatData>,
+    softirqs: Option<InterruptStatData>,
 }
 //
 impl StatData {
@@ -98,27 +99,32 @@ impl StatData {
         let mut data: Self = Default::default();
 
         // For each line of the initial contents of /proc/stat...
+        let mut num_cpu_timers = 0u8;
         for line in initial_contents.lines() {
             // ...decompose according whitespace...
             let mut whitespace_iter = line.split_whitespace();
 
             // ...and check the header
             match whitespace_iter.next().unwrap() {
-                // Statistics on all CPUs
-                // TODO: Check whether we correctly guess the number of fields
-                // TODO: Check that we know about all fields
-                "cpu" => unimplemented!(), // data.all_cpus = Some(CPUStatData::new()),
+                // Statistics on all CPUs, should come first
+                "cpu" => {
+                    num_cpu_timers = whitespace_iter.count() as u8;
+                    data.all_cpus = Some(CPUStatData::new(num_cpu_timers));
+                }
 
                 // Statistics on a specific CPU thread
                 header if &header[0..3] == "cpu" => {
-                    // If we didn't know, note that we have per-thread data
+                    // If we didn't know, note that we have per-thread data and
+                    // check for data format consistency with global CPU stats
                     if data.each_cpu.is_none() {
+                        assert_eq!(whitespace_iter.count() as u8,
+                                   num_cpu_timers);
                         data.each_cpu = Some(Vec::new());
                     }
 
                     // Add one thread-specific entry to the list
                     if let Some(ref mut cpu_vec) = data.each_cpu {
-                        cpu_vec.push(CPUStatData::new());
+                        cpu_vec.push(CPUStatData::new(num_cpu_timers));
                     }
                 },
 
@@ -130,9 +136,10 @@ impl StatData {
 
                 // Hardware interrupt statistics
                 "intr" => {
-                    // TODO: Figure out how many interrupt sources we have
-                    // TODO: Initialize data.interrupts accordingly
-                    unimplemented!();
+                    let num_interrupts = (whitespace_iter.count() - 1) as u16;
+                    data.interrupts = Some(
+                        InterruptStatData::new(num_interrupts)
+                    );
                 },
 
                 // Context switch statistics
@@ -156,31 +163,30 @@ impl StatData {
                 // Number of processes waiting for I/O
                 "procs_blocked" => data.blocked_processes = Some(Vec::new()),
 
-                // Soft IRQs statistics
+                // Softirq statistics
                 "softirq" => {
-                    // TODO: Figure out how many interrupt sources we have
-                    // TODO: Initialize data.soft_irqs accordingly
-                    unimplemented!();
+                    let num_interrupts = (whitespace_iter.count() - 1) as u16;
+                    data.softirqs = Some(
+                        InterruptStatData::new(num_interrupts)
+                    );
                 },
 
                 // Something we do not support yet? We should!
                 unknown_header => {
                     debug_assert!(false,
-                                  "Found unsupported entry '{}' in /proc/stat",
+                                  "Unsupported entry '{}' detected!",
                                   unknown_header);
                 }
             }
         }
 
-        // TODO: Return our result
-        // TODO: Check this against the /proc manual page very carefully and
-        //       implement plenty of tests for it. It's complex, so it's wrong.
-        unimplemented!();
+        // Return our data collection setup
+        data
     }
 }
 
 
-/// CPU statistics from /proc/stat, in structure-of-array layout
+/// The amount of CPU time that the system spent in various states
 struct CPUStatData {
     /// Time spent in user mode
     user_time: Vec<Duration>,
@@ -191,23 +197,23 @@ struct CPUStatData {
     /// Time spent in system (aka kernel) mode
     system_time: Vec<Duration>,
 
-    /// Time spent in the idle task
+    /// Time spent in the idle task (should match second entry in /proc/uptime)
     idle_time: Vec<Duration>,
 
     /// Time spent waiting for IO to complete (since Linux 2.5.41)
-    io_time: Option<Vec<Duration>>,
+    io_wait_time: Option<Vec<Duration>>,
 
     /// Time spent servicing hardware interrupts (since Linux 2.6.0-test4)
     irq_time: Option<Vec<Duration>>,
 
-    /// Time spent servicing soft-irqs (since Linux 2.6.0-test4)
-    soft_irq_time: Option<Vec<Duration>>,
+    /// Time spent servicing softirqs (since Linux 2.6.0-test4)
+    softirq_time: Option<Vec<Duration>>,
 
     /// "Stolen" time spent in other operating systems when running in a
     /// virtualized environment (since Linux 2.6.11)
     stolen_time: Option<Vec<Duration>>,
 
-    /// Time spent running in a virtual CPU for guest OSs (since Linux 2.6.24)
+    /// Time spent running a virtual CPU for guest OSs (since Linux 2.6.24)
     guest_time: Option<Vec<Duration>>,
 
     /// Time spent running a niced guest (see above, since Linux 2.6.33)
@@ -216,10 +222,23 @@ struct CPUStatData {
 //
 impl CPUStatData {
     /// Create new CPU statistics
-    fn new() -> Self {
-        // Conditionally create a Vec if a kernel version requirement is met
-        let vec_if_kernel_compatible = |major, minor, bugfix| {
-            if LINUX_VERSION.greater_eq(major, minor, bugfix) {
+    fn new(num_timers: u8) -> Self {
+        // Check if we correctly detected all CPU timers
+        debug_assert!(
+            (LINUX_VERSION.smaller(2, 5, 41)    && (num_timers == 4)) ||
+            (LINUX_VERSION.smaller(2, 6, 0)     && (num_timers == 5)) ||
+            (LINUX_VERSION.smaller(2, 6, 11)    && (num_timers == 7)) ||
+            (LINUX_VERSION.smaller(2, 6, 24)    && (num_timers == 8)) ||
+            (LINUX_VERSION.smaller(2, 6, 33)    && (num_timers == 9)) ||
+            (LINUX_VERSION.greater_eq(2, 6, 33) && (num_timers == 10)),
+            "Unknown CPU timers detected!"
+        );
+
+        // Conditionally create a certain amount of timing Vecs
+        let mut created_vecs = 4;
+        let mut conditional_vec = || -> Option<Vec<Duration>> {
+            created_vecs += 1;
+            if created_vecs <= num_timers {
                 Some(Vec::new())
             } else {
                 None
@@ -232,23 +251,23 @@ impl CPUStatData {
             nice_time: Vec::new(),
             system_time: Vec::new(),
             idle_time: Vec::new(),
-            io_time: vec_if_kernel_compatible(2, 5, 41),
-            irq_time: vec_if_kernel_compatible(2, 6, 1),
-            soft_irq_time: vec_if_kernel_compatible(2, 6, 1),
-            stolen_time: vec_if_kernel_compatible(2, 6, 11),
-            guest_time: vec_if_kernel_compatible(2, 6, 24),
-            guest_nice_time: vec_if_kernel_compatible(2, 6, 33),
+            io_wait_time: conditional_vec(),
+            irq_time: conditional_vec(),
+            softirq_time: conditional_vec(),
+            stolen_time: conditional_vec(),
+            guest_time: conditional_vec(),
+            guest_nice_time: conditional_vec(),
         }
     }
 }
 
 
-/// Paging statistics from /proc/stat, in structure-of-array layout
+/// Storage paging ativity statistics
 struct PagingStatData {
-    /// Number of pages that were paged in from disk
+    /// Number of RAM pages that were paged in from disk
     incoming: Vec<u64>,
 
-    /// Number of pages that were paged out to disk
+    /// Number of RAM pages that were paged out to disk
     outgoing: Vec<u64>,
 }
 //
@@ -269,7 +288,7 @@ struct InterruptStatData {
     /// sum of the breakdown below if there are unnumbered interrupt sources.
     total: Vec<u64>,
 
-    /// For each interrupt source, details on the amount of serviced interrupt.
+    /// For each numbered source, details on the amount of serviced interrupt.
     details: Vec<Vec<u64>>
 }
 //
@@ -290,6 +309,8 @@ mod tests {
     use std::thread;
     use std::time::Duration;
     use super::StatSampler;
+
+    // TODO: Add a big, big initialization test
     
     /// Check that no samples are initially present
     #[test]
