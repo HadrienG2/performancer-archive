@@ -46,15 +46,15 @@ impl StatSampler {
 ///
 /// Courtesy of Linux's total lack of promises regarding the variability of
 /// /proc/stat across hardware architectures, or even on a given system
-/// depending on kernel configuration, every entry of this struct is considered
-/// optional at this point...
+/// depending on kernel configuration, most entries of this struct are
+/// considered optional at this point...
 ///
 #[derive(Debug, Default, PartialEq)]
 struct StatData {
     /// Total CPU usage stats, aggregated across all hardware threads
     all_cpus: Option<CPUStatData>,
 
-    /// Per-CPU usage statistics, featuring one entry per hardware thread.
+    /// Per-CPU usage statistics, featuring one entry per hardware thread
     ///
     /// An empty Vec here has the same meaning as a None in other entries: the
     /// per-thread breakdown of CPU usage was not provided by the kernel.
@@ -93,10 +93,9 @@ struct StatData {
     /// in the same order as in /proc/softirq.
     softirqs: Option<InterruptStatData>,
 
-    /// This vector indicates how each line of /proc/stat maps to the members of
-    /// this struct. It basically is a legal and move-friendly variant of the
-    /// obvious alternative of making every XyzStatData struct implement some
-    /// StatDataParser trait and then using a Vec<&mut StatDataParser>.
+    /// INTERNAL: This vector indicates how each line of /proc/stat maps to the
+    /// members of this struct. It basically is a legal and move-friendly
+    /// variant of the obvious alternative to a Vec<&mut StatDataParser>.
     ///
     /// The idea of mapping lines of /proc/stat to struct members builds on the
     /// assumption, which we make in other places in this library, that the
@@ -223,7 +222,7 @@ impl StatData {
         let mut cpu_iter = self.each_cpu.iter_mut();
 
         // This time, we know how lines of /proc/stat map to our members
-        for (line, member) in file_contents.lines()
+        for (line, target) in file_contents.lines()
                                            .zip(self.line_target.iter()) {
             // The beginning of parsing is the same as before: split by spaces.
             // But this time, we discard the header, as we already know it.
@@ -231,7 +230,7 @@ impl StatData {
             stats.next();
 
             // Forward the /proc/stat data to the appropriate parser
-            match *member {
+            match *target {
                 StatDataMember::AllCPUs => {
                     Self::force_push(&mut self.all_cpus, stats);
                 },
@@ -270,12 +269,55 @@ impl StatData {
         debug_assert!(cpu_iter.next().is_none());
     }
 
+    // Tell how many samples are present in the data store, and in debug mode
+    // check for internal data store consistency
+    #[allow(dead_code)]
+    fn len(&self) -> Option<usize> {
+        let mut opt_len = None;
+        Self::update_len(&mut opt_len, &self.all_cpus);
+        debug_assert!(self.each_cpu.iter()
+                                   .all(|cpu| cpu.len() == opt_len.unwrap()));
+        Self::update_len(&mut opt_len, &self.paging);
+        Self::update_len(&mut opt_len, &self.swapping);
+        Self::update_len(&mut opt_len, &self.interrupts);
+        Self::update_len(&mut opt_len, &self.context_switches);
+        Self::update_len(&mut opt_len, &self.process_forks);
+        Self::update_len(&mut opt_len, &self.runnable_processes);
+        Self::update_len(&mut opt_len, &self.blocked_processes);
+        Self::update_len(&mut opt_len, &self.softirqs);
+        opt_len
+    }
+
     // INTERNAL: Helpful wrapper for pushing into optional containers that we
-    //           actually know from separate metadata to be around
-    fn force_push<T>(target: &mut Option<T>, stats: SplitWhitespace)
-        where T: StatDataParser
+    //           actually know from additional metadata to be around
+    fn force_push<T>(store: &mut Option<T>, stats: SplitWhitespace)
+        where T: StatDataStore
     {
-        target.as_mut().unwrap().push(stats);
+        store.as_mut().unwrap().push(stats);
+    }
+
+    // INTERNAL: Update our prior knowledge of the amount of stored samples
+    //           (current_len) according to an optional data source.
+    fn update_len<T>(current_len: &mut Option<usize>, opt_store: &Option<T>)
+        where T: StatDataStore
+    {
+        // This closure will get us the amount of samples stored inside of the
+        // optional data source as an Option<usize>, if we turn out to need it
+        let get_len = || opt_store.as_ref().map(|store| store.len());
+        
+        // Do we already know the amount of samples that should be in there?
+        match *current_len {
+            // If so, we only need to check if it is as expected, in debug mode
+            Some(old_len) => {
+                if let Some(new_len) = get_len() {
+                    debug_assert_eq!(new_len, old_len);
+                }
+            },
+
+            // If not, we can safely overwrite our knowledge of the amount of
+            // samples with data from our new data source
+            None => *current_len = get_len(),
+        }
     }
 }
 //
@@ -303,20 +345,27 @@ enum StatDataMember {
 
 /// Every container of /proc/stat data should implement the following trait,
 /// which exposes its ability to be filled from segmented /proc/stat contents.
-trait StatDataParser {
+trait StatDataStore {
     /// Parse and record a sample of data from /proc/stat
     fn push(&mut self, stats: SplitWhitespace);
+
+    /// Number of data samples that were recorded so far
+    fn len(&self) -> usize;
 }
 
 
 /// We implement this trait for primitive types that can be parsed from &str
-impl<T, U> StatDataParser for Vec<T>
+impl<T, U> StatDataStore for Vec<T>
     where T: FromStr<Err=U>,
           U: Debug
 {
     fn push(&mut self, mut stats: SplitWhitespace) {
         self.push(stats.next().unwrap().parse().unwrap());
         debug_assert!(stats.next().is_none());
+    }
+
+    fn len(&self) -> usize {
+        <Vec<T>>::len(self)
     }
 }
 
@@ -399,7 +448,7 @@ impl CPUStatData {
     }
 }
 //
-impl StatDataParser for CPUStatData {
+impl StatDataStore for CPUStatData {
     /// Parse CPU statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitWhitespace) {
         // This scope is needed to please rustc's current borrow checker
@@ -439,6 +488,30 @@ impl StatDataParser for CPUStatData {
         // At this point, we should have loaded all available stats
         debug_assert!(stats.next().is_none());
     }
+
+    // Tell how many samples are present in the data store
+    #[allow(dead_code)]
+    fn len(&self) -> usize {
+        // Check the mandatory CPU timers
+        let length = self.user_time.len();
+        debug_assert_eq!(length, self.nice_time.len());
+        debug_assert_eq!(length, self.system_time.len());
+        debug_assert_eq!(length, self.idle_time.len());
+
+        // Check the length of the optional CPU timers for consistency
+        let optional_len = |op: &Option<Vec<Duration>>| -> usize {
+            op.as_ref().map_or(length, |vec| vec.len())
+        };
+        debug_assert_eq!(length, optional_len(&self.io_wait_time));
+        debug_assert_eq!(length, optional_len(&self.irq_time));
+        debug_assert_eq!(length, optional_len(&self.softirq_time));
+        debug_assert_eq!(length, optional_len(&self.stolen_time));
+        debug_assert_eq!(length, optional_len(&self.guest_time));
+        debug_assert_eq!(length, optional_len(&self.guest_nice_time));
+
+        // Return the overall length
+        length
+    }
 }
 
 
@@ -463,7 +536,7 @@ impl InterruptStatData {
     }
 }
 //
-impl StatDataParser for InterruptStatData {
+impl StatDataStore for InterruptStatData {
     /// Parse interrupt statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitWhitespace) {
         // Load the total interrupt count
@@ -476,6 +549,14 @@ impl StatDataParser for InterruptStatData {
 
         // At this point, we should have loaded all available stats
         debug_assert!(stats.next().is_none());
+    }
+
+    // Tell how many samples are present in the data store
+    #[allow(dead_code)]
+    fn len(&self) -> usize {
+        let length = self.total.len();
+        debug_assert!(self.details.iter().all(|vec| vec.len() == length));
+        length
     }
 }
 
@@ -500,7 +581,7 @@ impl PagingStatData {
     }
 }
 //
-impl StatDataParser for PagingStatData {
+impl StatDataStore for PagingStatData {
     /// Parse paging statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitWhitespace) {
         // Load the incoming and outgoing page count
@@ -509,6 +590,14 @@ impl StatDataParser for PagingStatData {
 
         // At this point, we should have loaded all available stats
         debug_assert!(stats.next().is_none());
+    }
+
+    // Tell how many samples are present in the data store
+    #[allow(dead_code)]
+    fn len(&self) -> usize {
+        let length = self.incoming.len();
+        debug_assert_eq!(length, self.outgoing.len());
+        length
     }
 }
 
@@ -519,7 +608,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use std::time::Duration;
     use super::{CPUStatData, InterruptStatData, PagingStatData, StatData,
-                StatDataMember, StatDataParser};
+                StatDataMember, StatDataStore};
 
     // Check that CPU statistics initialization works as expected
     #[test]
@@ -532,17 +621,20 @@ mod tests {
         assert_eq!(oldest_stats.idle_time.len(), 0);
         assert!(oldest_stats.io_wait_time.is_none());
         assert!(oldest_stats.guest_nice_time.is_none());
+        assert_eq!(oldest_stats.len(), 0);
 
         // First known CPU stats extension from Linux 4.11's man proc
         let first_ext_stats = CPUStatData::new(5);
         assert_eq!(first_ext_stats.io_wait_time, Some(Vec::new()));
         assert!(first_ext_stats.irq_time.is_none());
         assert!(first_ext_stats.guest_nice_time.is_none());
+        assert_eq!(first_ext_stats.len(), 0);
 
         // Newest known CPU stats format from Linux 4.11's man proc
         let latest_stats = CPUStatData::new(10);
         assert_eq!(latest_stats.io_wait_time, Some(Vec::new()));
         assert_eq!(latest_stats.guest_nice_time, Some(Vec::new()));
+        assert_eq!(latest_stats.len(), 0);
     }
 
     // Check that parsing CPU statistics works as expected
@@ -564,18 +656,21 @@ mod tests {
         assert_eq!(oldest_stats.system_time, vec![tick_duration*96]);
         assert_eq!(oldest_stats.idle_time,   vec![tick_duration]);
         assert!(oldest_stats.io_wait_time.is_none());
+        assert_eq!(oldest_stats.len(), 1);
 
         // Check that "extended" stats are parsed as well
         let mut first_ext_stats = CPUStatData::new(5);
         first_ext_stats.push("9 698 6521 151 56".split_whitespace());
         assert_eq!(first_ext_stats.io_wait_time, Some(vec![tick_duration*56]));
         assert!(first_ext_stats.irq_time.is_none());
+        assert_eq!(first_ext_stats.len(), 1);
 
         // Check that "complete" stats are parsed as well
         let mut latest_stats = CPUStatData::new(10);
         latest_stats.push("18 9616 11 941 5 51 9 615 62 14".split_whitespace());
         assert_eq!(latest_stats.io_wait_time,    Some(vec![tick_duration*5]));
         assert_eq!(latest_stats.guest_nice_time, Some(vec![tick_duration*14]));
+        assert_eq!(latest_stats.len(), 1);
     }
 
     // Check that interrupt statistics initialization works as expected
@@ -585,18 +680,21 @@ mod tests {
         let no_details_stats = InterruptStatData::new(0);
         assert_eq!(no_details_stats.total.len(), 0);
         assert_eq!(no_details_stats.details.len(), 0);
+        assert_eq!(no_details_stats.len(), 0);
 
         // Check that interrupt statistics with two detailed counters work
         let two_stats = InterruptStatData::new(2);
         assert_eq!(two_stats.details.len(), 2);
         assert_eq!(two_stats.details[0].len(), 0);
         assert_eq!(two_stats.details[1].len(), 0);
+        assert_eq!(two_stats.len(), 0);
 
         // Check that interrupt statistics with lots of detailed counters work
         let many_stats = InterruptStatData::new(256);
         assert_eq!(many_stats.details.len(), 256);
         assert_eq!(many_stats.details[0].len(), 0);
         assert_eq!(many_stats.details[255].len(), 0);
+        assert_eq!(many_stats.len(), 0);
     }
 
     // Check that parsing interrupt statistics works as expected
@@ -607,12 +705,14 @@ mod tests {
         no_details_stats.push("12345".split_whitespace());
         assert_eq!(no_details_stats.total, vec![12345]);
         assert_eq!(no_details_stats.details.len(), 0);
+        assert_eq!(no_details_stats.len(), 1);
 
         // Interrupt statistics with two detailed counters
         let mut two_stats = InterruptStatData::new(2);
         two_stats.push("12345 678 910".split_whitespace());
         assert_eq!(two_stats.total, vec![12345]);
         assert_eq!(two_stats.details, vec![vec![678], vec![910]]);
+        assert_eq!(two_stats.len(), 1);
     }
 
     // Check that paging statistics initialization works as expected
@@ -621,6 +721,7 @@ mod tests {
         let stats = PagingStatData::new();
         assert_eq!(stats.incoming.len(), 0);
         assert_eq!(stats.outgoing.len(), 0);
+        assert_eq!(stats.len(), 0);
     }
 
     // Check that parsing paging statistics works as expected
@@ -630,6 +731,7 @@ mod tests {
         stats.push("123 456".split_whitespace());
         assert_eq!(stats.incoming, vec![123]);
         assert_eq!(stats.outgoing, vec![456]);
+        assert_eq!(stats.len(), 1);
     }
 
     // Check that statistical data initialization works as expected
