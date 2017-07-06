@@ -855,7 +855,57 @@ mod tests {
         assert_eq!(expected.len(), Some(0));
     }
 
-    // TODO: Add final parser test
+    // Check that statistical data parsing works as expected
+    #[test]
+    fn parse_stat_data() {
+        // Starting with an empty file (should never happen, but good base case)
+        let mut stats = String::new();
+        let mut empty_stats = StatData::new(&stats);
+        empty_stats.push(&stats);
+        let mut expected = StatData::new(&stats);
+        assert_eq!(empty_stats, expected);
+
+        // Adding global CPU stats
+        stats.push_str("cpu 1 2 3 4");
+        let mut global_cpu_stats = StatData::new(&stats);
+        global_cpu_stats.push(&stats);
+        expected = StatData::new(&stats);
+        expected.all_cpus.as_mut().unwrap().push("1 2 3 4".split_whitespace());
+        assert_eq!(global_cpu_stats, expected);
+        assert_eq!(expected.len(), Some(1));
+
+        // Adding dual-core CPU stats
+        stats.push_str("\ncpu0 0 1 1 3
+                          cpu1 1 1 2 1");
+        let mut local_cpu_stats = StatData::new(&stats);
+        local_cpu_stats.push(&stats);
+        expected = StatData::new(&stats);
+        expected.all_cpus.as_mut().unwrap().push("1 2 3 4".split_whitespace());
+        expected.each_cpu[0].push("0 1 1 3".split_whitespace());
+        expected.each_cpu[1].push("1 1 2 1".split_whitespace());
+        assert_eq!(local_cpu_stats, expected);
+        assert_eq!(expected.len(), Some(1));
+
+        // Starting over from paging stats
+        stats = String::from("page 42 43");
+        let mut paging_stats = StatData::new(&stats);
+        paging_stats.push(&stats);
+        expected = StatData::new(&stats);
+        expected.paging.as_mut().unwrap().push("42 43".split_whitespace());
+        assert_eq!(paging_stats, expected);
+        assert_eq!(expected.len(), Some(1));
+
+        // Starting over from softirq stats
+        stats = String::from("softirq 94651 1561 21211 12 71867");
+        let mut softirq_stats = StatData::new(&stats);
+        softirq_stats.push(&stats);
+        expected = StatData::new(&stats);
+        expected.softirqs.as_mut().unwrap()
+                         .push("94651 1561 21211 12 71867".split_whitespace());
+        assert_eq!(softirq_stats, expected);
+        assert_eq!(expected.len(), Some(1));
+    }
+
     // TODO: Add sampler tests (init & sampling)
 
     /* TODO: Restore this
