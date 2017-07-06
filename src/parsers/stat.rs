@@ -610,6 +610,16 @@ mod tests {
     use super::{CPUStatData, InterruptStatData, PagingStatData, StatData,
                 StatDataMember, StatDataStore};
 
+    // Check that scalar statistics parsing works as expected
+    #[test]
+    fn parse_scalar_stat() {
+        let mut scalar_stats = Vec::<u64>::new();
+        assert_eq!(StatDataStore::len(&scalar_stats), 0);
+        StatDataStore::push(&mut scalar_stats, "123".split_whitespace());
+        assert_eq!(scalar_stats, vec![123]);
+        assert_eq!(StatDataStore::len(&scalar_stats), 1);
+    }
+
     // Check that CPU statistics initialization works as expected
     #[test]
     fn init_cpu_stat() {
@@ -833,7 +843,6 @@ mod tests {
         assert_eq!(softirq_stats, expected);
     }
 
-    // TODO: Add scalar parser test (on top)
     // TODO: Add final parser test
     // TODO: Add sampler tests (init & sampling)
 
