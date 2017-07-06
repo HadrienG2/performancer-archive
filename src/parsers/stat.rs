@@ -95,7 +95,7 @@ struct StatData {
 
     /// INTERNAL: This vector indicates how each line of /proc/stat maps to the
     /// members of this struct. It basically is a legal and move-friendly
-    /// variant of the obvious alternative to a Vec<&mut StatDataParser>.
+    /// variant of the obvious Vec<&mut StatDataParser> approach.
     ///
     /// The idea of mapping lines of /proc/stat to struct members builds on the
     /// assumption, which we make in other places in this library, that the
@@ -761,6 +761,7 @@ mod tests {
         assert!(empty_stats.runnable_processes.is_none());
         assert!(empty_stats.blocked_processes.is_none());
         assert!(empty_stats.softirqs.is_none());
+        assert_eq!(empty_stats.len(), None);
         let mut expected = empty_stats;
 
         // ...adding global CPU stats
@@ -769,6 +770,7 @@ mod tests {
         expected.all_cpus = Some(CPUStatData::new(4));
         expected.line_target.push(StatDataMember::AllCPUs);
         assert_eq!(global_cpu_stats, expected);
+        assert_eq!(expected.len(), Some(0));
 
         // ...adding dual-core CPU stats
         stats.push_str("\ncpu0 0 1 1 3
@@ -778,6 +780,7 @@ mod tests {
         expected.line_target.push(StatDataMember::EachCPU);
         expected.line_target.push(StatDataMember::EachCPU);
         assert_eq!(local_cpu_stats, expected);
+        assert_eq!(expected.len(), Some(0));
 
         // ...adding paging stats
         stats.push_str("\npage 42 43");
@@ -785,6 +788,7 @@ mod tests {
         expected.paging = Some(PagingStatData::new());
         expected.line_target.push(StatDataMember::Paging);
         assert_eq!(paging_stats, expected);
+        assert_eq!(expected.len(), Some(0));
 
         // ...adding swapping stats
         stats.push_str("\nswap 24 34");
@@ -792,6 +796,7 @@ mod tests {
         expected.swapping = Some(PagingStatData::new());
         expected.line_target.push(StatDataMember::Swapping);
         assert_eq!(swapping_stats, expected);
+        assert_eq!(expected.len(), Some(0));
 
         // ...adding interrupt stats
         stats.push_str("\nintr 12345 678 910");
@@ -799,6 +804,7 @@ mod tests {
         expected.interrupts = Some(InterruptStatData::new(2));
         expected.line_target.push(StatDataMember::Interrupts);
         assert_eq!(interrupt_stats, expected);
+        assert_eq!(expected.len(), Some(0));
 
         // ...adding context switches
         stats.push_str("\nctxt 654321");
@@ -806,6 +812,7 @@ mod tests {
         expected.context_switches = Some(Vec::new());
         expected.line_target.push(StatDataMember::ContextSwitches);
         assert_eq!(context_stats, expected);
+        assert_eq!(expected.len(), Some(0));
 
         // ...adding boot time
         stats.push_str("\nbtime 5738295");
@@ -813,6 +820,7 @@ mod tests {
         expected.boot_time = Some(Utc.timestamp(5738295, 0));
         expected.line_target.push(StatDataMember::BootTime);
         assert_eq!(boot_time_stats, expected);
+        assert_eq!(expected.len(), Some(0));
 
         // ...adding process fork counter
         stats.push_str("\nprocesses 94536551");
@@ -820,6 +828,7 @@ mod tests {
         expected.process_forks = Some(Vec::new());
         expected.line_target.push(StatDataMember::ProcessForks);
         assert_eq!(process_fork_stats, expected);
+        assert_eq!(expected.len(), Some(0));
 
         // ...adding runnable process counter
         stats.push_str("\nprocs_running 1624");
@@ -827,6 +836,7 @@ mod tests {
         expected.runnable_processes = Some(Vec::new());
         expected.line_target.push(StatDataMember::RunnableProcesses);
         assert_eq!(runnable_process_stats, expected);
+        assert_eq!(expected.len(), Some(0));
 
         // ...adding blocked process counter
         stats.push_str("\nprocs_blocked 8948");
@@ -834,6 +844,7 @@ mod tests {
         expected.blocked_processes = Some(Vec::new());
         expected.line_target.push(StatDataMember::BlockedProcesses);
         assert_eq!(blocked_process_stats, expected);
+        assert_eq!(expected.len(), Some(0));
 
         // ...adding softirq stats
         stats.push_str("\nsoftirq 94651 1561 21211 12 71867");
@@ -841,6 +852,7 @@ mod tests {
         expected.softirqs = Some(InterruptStatData::new(4));
         expected.line_target.push(StatDataMember::SoftIRQs);
         assert_eq!(softirq_stats, expected);
+        assert_eq!(expected.len(), Some(0));
     }
 
     // TODO: Add final parser test
