@@ -272,7 +272,7 @@ impl StatData {
     // Tell how many samples are present in the data store, and in debug mode
     // check for internal data store consistency
     #[allow(dead_code)]
-    fn len(&self) -> Option<usize> {
+    fn len(&self) -> usize {
         let mut opt_len = None;
         Self::update_len(&mut opt_len, &self.all_cpus);
         debug_assert!(self.each_cpu.iter()
@@ -285,7 +285,7 @@ impl StatData {
         Self::update_len(&mut opt_len, &self.runnable_processes);
         Self::update_len(&mut opt_len, &self.blocked_processes);
         Self::update_len(&mut opt_len, &self.softirqs);
-        opt_len
+        opt_len.unwrap_or(0)
     }
 
     // INTERNAL: Helpful wrapper for pushing into optional containers that we
@@ -403,9 +403,6 @@ struct CPUStatData {
 
     /// Time spent running a niced guest (see above, since Linux 2.6.33)
     guest_nice_time: Option<Vec<Duration>>,
-
-    /// INTERNAL: Number of "ticks" from /proc/stat per second
-    ticks_per_sec: u64,
 }
 //
 impl CPUStatData {
@@ -441,9 +438,6 @@ impl CPUStatData {
             stolen_time: conditional_vec(),
             guest_time: conditional_vec(),
             guest_nice_time: conditional_vec(),
-
-            // We need this to convert /proc/stat readouts into Durations
-            ticks_per_sec: unsafe { libc::sysconf(libc::_SC_CLK_TCK) as u64 },
         }
     }
 }
@@ -454,13 +448,12 @@ impl StatDataStore for CPUStatData {
         // This scope is needed to please rustc's current borrow checker
         {
             // This is how we parse the next duration from the input (if any)
-            let ticks_per_sec = self.ticks_per_sec;
             let mut next_stat = || -> Option<Duration> {
                 stats.next().map(|str_duration| -> Duration {
                     let raw_ticks: u64 = str_duration.parse().unwrap();
-                    let secs = raw_ticks / ticks_per_sec;
-                    let nanosecs = (raw_ticks % ticks_per_sec)
-                                        * (1_000_000_000 / ticks_per_sec);
+                    let secs = raw_ticks / *TICKS_PER_SEC;
+                    let nanosecs = (raw_ticks % *TICKS_PER_SEC)
+                                        * (1_000_000_000 / *TICKS_PER_SEC);
                     Duration::new(secs, nanosecs as u32)
                 })
             };
@@ -512,6 +505,13 @@ impl StatDataStore for CPUStatData {
         // Return the overall length
         length
     }
+}
+//
+lazy_static! {
+    /// Number of CPU ticks from the statistics of /proc/stat in one second
+    static ref TICKS_PER_SEC: u64 = unsafe {
+        libc::sysconf(libc::_SC_CLK_TCK) as u64
+    };
 }
 
 
@@ -608,7 +608,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use std::time::Duration;
     use super::{CPUStatData, InterruptStatData, PagingStatData, StatData,
-                StatDataMember, StatDataStore};
+                StatDataMember, StatDataStore, StatSampler, TICKS_PER_SEC};
 
     // Check that scalar statistics parsing works as expected
     #[test]
@@ -656,7 +656,7 @@ mod tests {
         // Figure out the duration of a kernel tick
         let tick_duration = Duration::new(
             0,
-            (1_000_000_000 / oldest_stats.ticks_per_sec) as u32
+            (1_000_000_000 / *TICKS_PER_SEC) as u32
         );
 
         // Check that "old" CPU stats are parsed properly
@@ -761,7 +761,6 @@ mod tests {
         assert!(empty_stats.runnable_processes.is_none());
         assert!(empty_stats.blocked_processes.is_none());
         assert!(empty_stats.softirqs.is_none());
-        assert_eq!(empty_stats.len(), None);
         let mut expected = empty_stats;
 
         // ...adding global CPU stats
@@ -770,7 +769,7 @@ mod tests {
         expected.all_cpus = Some(CPUStatData::new(4));
         expected.line_target.push(StatDataMember::AllCPUs);
         assert_eq!(global_cpu_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
 
         // ...adding dual-core CPU stats
         stats.push_str("\ncpu0 0 1 1 3
@@ -780,7 +779,7 @@ mod tests {
         expected.line_target.push(StatDataMember::EachCPU);
         expected.line_target.push(StatDataMember::EachCPU);
         assert_eq!(local_cpu_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
 
         // ...adding paging stats
         stats.push_str("\npage 42 43");
@@ -788,7 +787,7 @@ mod tests {
         expected.paging = Some(PagingStatData::new());
         expected.line_target.push(StatDataMember::Paging);
         assert_eq!(paging_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
 
         // ...adding swapping stats
         stats.push_str("\nswap 24 34");
@@ -796,7 +795,7 @@ mod tests {
         expected.swapping = Some(PagingStatData::new());
         expected.line_target.push(StatDataMember::Swapping);
         assert_eq!(swapping_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
 
         // ...adding interrupt stats
         stats.push_str("\nintr 12345 678 910");
@@ -804,7 +803,7 @@ mod tests {
         expected.interrupts = Some(InterruptStatData::new(2));
         expected.line_target.push(StatDataMember::Interrupts);
         assert_eq!(interrupt_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
 
         // ...adding context switches
         stats.push_str("\nctxt 654321");
@@ -812,7 +811,7 @@ mod tests {
         expected.context_switches = Some(Vec::new());
         expected.line_target.push(StatDataMember::ContextSwitches);
         assert_eq!(context_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
 
         // ...adding boot time
         stats.push_str("\nbtime 5738295");
@@ -820,7 +819,7 @@ mod tests {
         expected.boot_time = Some(Utc.timestamp(5738295, 0));
         expected.line_target.push(StatDataMember::BootTime);
         assert_eq!(boot_time_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
 
         // ...adding process fork counter
         stats.push_str("\nprocesses 94536551");
@@ -828,7 +827,7 @@ mod tests {
         expected.process_forks = Some(Vec::new());
         expected.line_target.push(StatDataMember::ProcessForks);
         assert_eq!(process_fork_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
 
         // ...adding runnable process counter
         stats.push_str("\nprocs_running 1624");
@@ -836,7 +835,7 @@ mod tests {
         expected.runnable_processes = Some(Vec::new());
         expected.line_target.push(StatDataMember::RunnableProcesses);
         assert_eq!(runnable_process_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
 
         // ...adding blocked process counter
         stats.push_str("\nprocs_blocked 8948");
@@ -844,7 +843,7 @@ mod tests {
         expected.blocked_processes = Some(Vec::new());
         expected.line_target.push(StatDataMember::BlockedProcesses);
         assert_eq!(blocked_process_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
 
         // ...adding softirq stats
         stats.push_str("\nsoftirq 94651 1561 21211 12 71867");
@@ -852,7 +851,7 @@ mod tests {
         expected.softirqs = Some(InterruptStatData::new(4));
         expected.line_target.push(StatDataMember::SoftIRQs);
         assert_eq!(softirq_stats, expected);
-        assert_eq!(expected.len(), Some(0));
+        assert_eq!(expected.len(), 0);
     }
 
     // Check that statistical data parsing works as expected
@@ -872,7 +871,7 @@ mod tests {
         expected = StatData::new(&stats);
         expected.all_cpus.as_mut().unwrap().push("1 2 3 4".split_whitespace());
         assert_eq!(global_cpu_stats, expected);
-        assert_eq!(expected.len(), Some(1));
+        assert_eq!(expected.len(), 1);
 
         // Adding dual-core CPU stats
         stats.push_str("\ncpu0 0 1 1 3
@@ -884,7 +883,7 @@ mod tests {
         expected.each_cpu[0].push("0 1 1 3".split_whitespace());
         expected.each_cpu[1].push("1 1 2 1".split_whitespace());
         assert_eq!(local_cpu_stats, expected);
-        assert_eq!(expected.len(), Some(1));
+        assert_eq!(expected.len(), 1);
 
         // Starting over from paging stats
         stats = String::from("page 42 43");
@@ -893,7 +892,7 @@ mod tests {
         expected = StatData::new(&stats);
         expected.paging.as_mut().unwrap().push("42 43".split_whitespace());
         assert_eq!(paging_stats, expected);
-        assert_eq!(expected.len(), Some(1));
+        assert_eq!(expected.len(), 1);
 
         // Starting over from softirq stats
         stats = String::from("softirq 94651 1561 21211 12 71867");
@@ -903,47 +902,25 @@ mod tests {
         expected.softirqs.as_mut().unwrap()
                          .push("94651 1561 21211 12 71867".split_whitespace());
         assert_eq!(softirq_stats, expected);
-        assert_eq!(expected.len(), Some(1));
+        assert_eq!(expected.len(), 1);
     }
 
-    // TODO: Add sampler tests (init & sampling)
-
-    /* TODO: Restore this
-    /// Check that no samples are initially present
+    // Check that sampler initialization works well
     #[test]
-    fn new_sampler() {
-        let stat = StatSampler::new().unwrap();
-        unimplemented!();
-        /* assert_eq!(uptime.samples.wall_clock_uptime.len(), 0);
-        assert_eq!(uptime.samples.cpu_idle_time.len(), 0); */
-    } */
+    fn init_sampler() {
+        let stats = StatSampler::new().unwrap();
+        assert_eq!(stats.samples.len(), 0);
+    }
 
-    /* TODO: Restore this 
-    /// Test that basic sampling works as expected
+    // Check that basic sampling works as expected
     #[test]
     fn basic_sampling() {
-        // Create an uptime sampler
-        let mut uptime = UptimeSampler::new().unwrap();
-
-        // Acquire a first sample
-        uptime.sample().unwrap();
-        assert_eq!(uptime.samples.wall_clock_uptime.len(), 1);
-        assert_eq!(uptime.samples.cpu_idle_time.len(), 1);
-
-        // Wait a bit
-        thread::sleep(Duration::from_millis(50));
-
-        // Acquire another sample
-        uptime.sample().unwrap();
-        assert_eq!(uptime.samples.wall_clock_uptime.len(), 2);
-        assert_eq!(uptime.samples.cpu_idle_time.len(), 2);
-
-        // The uptime and idle time should have increased
-        assert!(uptime.samples.wall_clock_uptime[1] >
-                    uptime.samples.wall_clock_uptime[0]);
-        assert!(uptime.samples.cpu_idle_time[1] >
-                    uptime.samples.cpu_idle_time[0]);
-    } */
+        let mut stats = StatSampler::new().unwrap();
+        stats.sample().unwrap();
+        assert_eq!(stats.samples.len(), 1);
+        stats.sample().unwrap();
+        assert_eq!(stats.samples.len(), 2);
+    }
 }
 
 
