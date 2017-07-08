@@ -565,7 +565,7 @@ impl StatDataStore for InterruptStatData {
     }
 }
 ///
-/// On some platforms, such as x86, there are a lot of hardware IRQs (~500 on my
+/// On some platforms such as x86, there are a lot of hardware IRQs (~500 on my
 /// machines), but most of them are unused and never fire. Parsing and storing
 /// the associated zeroes from /proc/stat by normal means wastes CPU time and
 /// RAM, so we take a shortcut for this common use case.
@@ -602,7 +602,7 @@ impl InterruptCounts {
                 }
             },
 
-            // Otherwise, just insert the new interrupt count sample
+            // If the interrupt counter is nonzero, sample it normally
             InterruptCounts::Samples(ref mut vec) => {
                 vec.push(intr_count.parse().unwrap());
             }
