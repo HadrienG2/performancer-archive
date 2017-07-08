@@ -742,6 +742,8 @@ mod tests {
         assert_eq!(latest_stats.len(), 1);
     }
 
+    // TODO: Write unit tests for the InterruptCounts
+
     // Check that interrupt statistics initialization works as expected
     #[test]
     fn init_interrupt_stat() {
@@ -780,8 +782,9 @@ mod tests {
         let mut two_stats = InterruptStatData::new(2);
         two_stats.push(SplitSpace::new("12345 678 910"));
         assert_eq!(two_stats.total, vec![12345]);
-        assert_eq!(two_stats.details, vec![InterruptCounts::Samples(vec![678]),
-                                           InterruptCounts::Samples(vec![910])]);
+        assert_eq!(two_stats.details, 
+                   vec![InterruptCounts::Samples(vec![678]),
+                        InterruptCounts::Samples(vec![910])]);
         assert_eq!(two_stats.len(), 1);
     }
 
