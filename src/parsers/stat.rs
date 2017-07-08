@@ -3,9 +3,10 @@
 use ::ProcFileReader;
 use chrono::{DateTime, TimeZone, Utc};
 use libc;
+use parsers::SplitSpace;
 use std::fmt::Debug;
 use std::io::Result;
-use std::str::{FromStr, SplitWhitespace};
+use std::str::FromStr;
 use std::time::Duration;
 
 
@@ -118,7 +119,7 @@ impl StatData {
         // For each line of the initial contents of /proc/stat...
         for line in initial_contents.lines() {
             // ...decompose according whitespace...
-            let mut whitespace_iter = line.split_whitespace();
+            let mut whitespace_iter = SplitSpace::new(line);
 
             // ...and check the header
             match whitespace_iter.next().unwrap() {
@@ -226,7 +227,7 @@ impl StatData {
                                            .zip(self.line_target.iter()) {
             // The beginning of parsing is the same as before: split by spaces.
             // But this time, we discard the header, as we already know it.
-            let mut stats = line.split_whitespace();
+            let mut stats = SplitSpace::new(line);
             stats.next();
 
             // Forward the /proc/stat data to the appropriate parser
@@ -290,7 +291,7 @@ impl StatData {
 
     // INTERNAL: Helpful wrapper for pushing into optional containers that we
     //           actually know from additional metadata to be around
-    fn force_push<T>(store: &mut Option<T>, stats: SplitWhitespace)
+    fn force_push<T>(store: &mut Option<T>, stats: SplitSpace)
         where T: StatDataStore
     {
         store.as_mut().unwrap().push(stats);
@@ -347,7 +348,7 @@ enum StatDataMember {
 /// which exposes its ability to be filled from segmented /proc/stat contents.
 trait StatDataStore {
     /// Parse and record a sample of data from /proc/stat
-    fn push(&mut self, stats: SplitWhitespace);
+    fn push(&mut self, stats: SplitSpace);
 
     /// Number of data samples that were recorded so far
     fn len(&self) -> usize;
@@ -359,7 +360,7 @@ impl<T, U> StatDataStore for Vec<T>
     where T: FromStr<Err=U>,
           U: Debug
 {
-    fn push(&mut self, mut stats: SplitWhitespace) {
+    fn push(&mut self, mut stats: SplitSpace) {
         self.push(stats.next().unwrap().parse().unwrap());
         debug_assert!(stats.next().is_none());
     }
@@ -444,7 +445,7 @@ impl CPUStatData {
 //
 impl StatDataStore for CPUStatData {
     /// Parse CPU statistics and add them to the internal data store
-    fn push(&mut self, mut stats: SplitWhitespace) {
+    fn push(&mut self, mut stats: SplitSpace) {
         // This scope is needed to please rustc's current borrow checker
         {
             // This is how we parse the next duration from the input (if any)
@@ -538,7 +539,7 @@ impl InterruptStatData {
 //
 impl StatDataStore for InterruptStatData {
     /// Parse interrupt statistics and add them to the internal data store
-    fn push(&mut self, mut stats: SplitWhitespace) {
+    fn push(&mut self, mut stats: SplitSpace) {
         // Load the total interrupt count
         self.total.push(stats.next().unwrap().parse().unwrap());
 
@@ -583,7 +584,7 @@ impl PagingStatData {
 //
 impl StatDataStore for PagingStatData {
     /// Parse paging statistics and add them to the internal data store
-    fn push(&mut self, mut stats: SplitWhitespace) {
+    fn push(&mut self, mut stats: SplitSpace) {
         // Load the incoming and outgoing page count
         self.incoming.push(stats.next().unwrap().parse().unwrap());
         self.outgoing.push(stats.next().unwrap().parse().unwrap());
@@ -607,7 +608,7 @@ impl StatDataStore for PagingStatData {
 mod tests {
     use chrono::{TimeZone, Utc};
     use std::time::Duration;
-    use super::{CPUStatData, InterruptStatData, PagingStatData, StatData,
+    use super::{CPUStatData, InterruptStatData, PagingStatData, SplitSpace, StatData,
                 StatDataMember, StatDataStore, StatSampler, TICKS_PER_SEC};
 
     // Check that scalar statistics parsing works as expected
@@ -615,7 +616,7 @@ mod tests {
     fn parse_scalar_stat() {
         let mut scalar_stats = Vec::<u64>::new();
         assert_eq!(StatDataStore::len(&scalar_stats), 0);
-        StatDataStore::push(&mut scalar_stats, "123".split_whitespace());
+        StatDataStore::push(&mut scalar_stats, SplitSpace::new("123"));
         assert_eq!(scalar_stats, vec![123]);
         assert_eq!(StatDataStore::len(&scalar_stats), 1);
     }
@@ -660,7 +661,7 @@ mod tests {
         );
 
         // Check that "old" CPU stats are parsed properly
-        oldest_stats.push("165 18 96 1".split_whitespace());
+        oldest_stats.push(SplitSpace::new("165 18 96 1"));
         assert_eq!(oldest_stats.user_time,   vec![tick_duration*165]);
         assert_eq!(oldest_stats.nice_time,   vec![tick_duration*18]);
         assert_eq!(oldest_stats.system_time, vec![tick_duration*96]);
@@ -670,14 +671,14 @@ mod tests {
 
         // Check that "extended" stats are parsed as well
         let mut first_ext_stats = CPUStatData::new(5);
-        first_ext_stats.push("9 698 6521 151 56".split_whitespace());
+        first_ext_stats.push(SplitSpace::new("9 698 6521 151 56"));
         assert_eq!(first_ext_stats.io_wait_time, Some(vec![tick_duration*56]));
         assert!(first_ext_stats.irq_time.is_none());
         assert_eq!(first_ext_stats.len(), 1);
 
         // Check that "complete" stats are parsed as well
         let mut latest_stats = CPUStatData::new(10);
-        latest_stats.push("18 9616 11 941 5 51 9 615 62 14".split_whitespace());
+        latest_stats.push(SplitSpace::new("18 9616 11 941 5 51 9 615 62 14"));
         assert_eq!(latest_stats.io_wait_time,    Some(vec![tick_duration*5]));
         assert_eq!(latest_stats.guest_nice_time, Some(vec![tick_duration*14]));
         assert_eq!(latest_stats.len(), 1);
@@ -712,14 +713,14 @@ mod tests {
     fn parse_interrupt_stat() {
         // Interrupt statistics without any detail
         let mut no_details_stats = InterruptStatData::new(0);
-        no_details_stats.push("12345".split_whitespace());
+        no_details_stats.push(SplitSpace::new("12345"));
         assert_eq!(no_details_stats.total, vec![12345]);
         assert_eq!(no_details_stats.details.len(), 0);
         assert_eq!(no_details_stats.len(), 1);
 
         // Interrupt statistics with two detailed counters
         let mut two_stats = InterruptStatData::new(2);
-        two_stats.push("12345 678 910".split_whitespace());
+        two_stats.push(SplitSpace::new("12345 678 910"));
         assert_eq!(two_stats.total, vec![12345]);
         assert_eq!(two_stats.details, vec![vec![678], vec![910]]);
         assert_eq!(two_stats.len(), 1);
@@ -738,7 +739,7 @@ mod tests {
     #[test]
     fn parse_paging_stat() {
         let mut stats = PagingStatData::new();
-        stats.push("123 456".split_whitespace());
+        stats.push(SplitSpace::new("123 456"));
         assert_eq!(stats.incoming, vec![123]);
         assert_eq!(stats.outgoing, vec![456]);
         assert_eq!(stats.len(), 1);
@@ -869,7 +870,7 @@ mod tests {
         let mut global_cpu_stats = StatData::new(&stats);
         global_cpu_stats.push(&stats);
         expected = StatData::new(&stats);
-        expected.all_cpus.as_mut().unwrap().push("1 2 3 4".split_whitespace());
+        expected.all_cpus.as_mut().unwrap().push(SplitSpace::new("1 2 3 4"));
         assert_eq!(global_cpu_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -879,9 +880,9 @@ mod tests {
         let mut local_cpu_stats = StatData::new(&stats);
         local_cpu_stats.push(&stats);
         expected = StatData::new(&stats);
-        expected.all_cpus.as_mut().unwrap().push("1 2 3 4".split_whitespace());
-        expected.each_cpu[0].push("0 1 1 3".split_whitespace());
-        expected.each_cpu[1].push("1 1 2 1".split_whitespace());
+        expected.all_cpus.as_mut().unwrap().push(SplitSpace::new("1 2 3 4"));
+        expected.each_cpu[0].push(SplitSpace::new("0 1 1 3"));
+        expected.each_cpu[1].push(SplitSpace::new("1 1 2 1"));
         assert_eq!(local_cpu_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -890,7 +891,7 @@ mod tests {
         let mut paging_stats = StatData::new(&stats);
         paging_stats.push(&stats);
         expected = StatData::new(&stats);
-        expected.paging.as_mut().unwrap().push("42 43".split_whitespace());
+        expected.paging.as_mut().unwrap().push(SplitSpace::new("42 43"));
         assert_eq!(paging_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -900,7 +901,7 @@ mod tests {
         softirq_stats.push(&stats);
         expected = StatData::new(&stats);
         expected.softirqs.as_mut().unwrap()
-                         .push("94651 1561 21211 12 71867".split_whitespace());
+                         .push(SplitSpace::new("94651 1561 21211 12 71867"));
         assert_eq!(softirq_stats, expected);
         assert_eq!(expected.len(), 1);
     }
