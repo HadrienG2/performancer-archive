@@ -524,7 +524,7 @@ struct InterruptStatData {
     total: Vec<u64>,
 
     /// For each numbered source, details on the amount of serviced interrupt.
-    details: Vec<Vec<u64>>
+    details: Vec<InterruptCounts>
 }
 //
 impl InterruptStatData {
@@ -532,7 +532,7 @@ impl InterruptStatData {
     fn new(num_irqs: u16) -> Self {
         Self {
             total: Vec::new(),
-            details: vec![Vec::new(); num_irqs as usize],
+            details: vec![InterruptCounts::new(); num_irqs as usize],
         }
     }
 }
@@ -543,29 +543,9 @@ impl StatDataStore for InterruptStatData {
         // Load the total interrupt count
         self.total.push(stats.next().unwrap().parse().unwrap());
 
-        // DEBUG: Experiment around faster interrupt count parsing
-        //
-        // On some platforms, there are a lot of hardware IRQs (456 on my x86
-        // machine), but most of them are unused and never fire.
-        //
-        // As a result, the interrupt statistics contain plenty of zeros, which
-        // stress the integer parser. By special-casing for them, a nice parsing
-        // speed improvement (~15%) can be obtained.
-        //
-        let fast_parse_u64 = |source: &str| -> u64 {
-            match source {
-                "0" => 0,
-                _ => source.parse().unwrap(),
-            }
-        };
-
         // Load the detailed interrupt counts from each source
         for detail in self.details.iter_mut() {
-            // TODO: I am now bottlenecked by pushing zeros into vectors.
-            // Investigate a compressed representation for sequences of zeros.
-            // I propose using for "details" an enum which is either a vector of
-            // samples or a counter of zeroes.
-            detail.push(fast_parse_u64(stats.next().unwrap()));
+            detail.push(stats.next().unwrap());
         }
 
         // At this point, we should have loaded all available stats
@@ -578,6 +558,59 @@ impl StatDataStore for InterruptStatData {
         let length = self.total.len();
         debug_assert!(self.details.iter().all(|vec| vec.len() == length));
         length
+    }
+}
+///
+/// On some platforms, such as x86, there are a lot of hardware IRQs (~500 on my
+/// machines), but most of them are unused and never fire. Parsing and storing
+/// the associated zeroes from /proc/stat by normal means wastes CPU time and
+/// RAM, so we take a shortcut for this common use case.
+///
+#[derive(Clone, Debug, PartialEq)]
+enum InterruptCounts {
+    /// If we've only ever seen zeroes, we only count the number of zeroes
+    Zeroes(usize),
+
+    /// Otherwise, we sample the interrupt counts normally
+    Samples(Vec<u64>),
+}
+//
+impl InterruptCounts {
+    /// Initialize the interrupt count sampler
+    fn new() -> Self {
+        InterruptCounts::Zeroes(0)
+    }
+
+    /// Insert a new interrupt count from /proc/stat
+    fn push(&mut self, intr_count: &str) {
+        match *self {
+            // Have we only seen zeroes so far?
+            InterruptCounts::Zeroes(zero_count) => {
+                // Are we seeing a zero again?
+                if intr_count == "0" {
+                    // If yes, just increment the zero counter
+                    *self = InterruptCounts::Zeroes(zero_count+1);
+                } else {
+                    // If not, move to regular interrupt count sampling
+                    let mut samples = vec![0; zero_count];
+                    samples.push(intr_count.parse().unwrap());
+                    *self = InterruptCounts::Samples(samples);
+                }
+            },
+
+            // Otherwise, just insert the new interrupt count sample
+            InterruptCounts::Samples(ref mut vec) => {
+                vec.push(intr_count.parse().unwrap());
+            }
+        }
+    }
+
+    /// Tell how many interrupt counts we have recorded so far
+    fn len(&self) -> usize {
+        match *self {
+            InterruptCounts::Zeroes(zero_count) => zero_count,
+            InterruptCounts::Samples(ref vec) => vec.len(),
+        }
     }
 }
 
@@ -628,8 +661,9 @@ impl StatDataStore for PagingStatData {
 mod tests {
     use chrono::{TimeZone, Utc};
     use std::time::Duration;
-    use super::{CPUStatData, InterruptStatData, PagingStatData, SplitSpace, StatData,
-                StatDataMember, StatDataStore, StatSampler, TICKS_PER_SEC};
+    use super::{CPUStatData, InterruptCounts, InterruptStatData, PagingStatData,
+                SplitSpace, StatData, StatDataMember, StatDataStore,
+                StatSampler, TICKS_PER_SEC};
 
     // Check that scalar statistics parsing works as expected
     #[test]
@@ -742,7 +776,8 @@ mod tests {
         let mut two_stats = InterruptStatData::new(2);
         two_stats.push(SplitSpace::new("12345 678 910"));
         assert_eq!(two_stats.total, vec![12345]);
-        assert_eq!(two_stats.details, vec![vec![678], vec![910]]);
+        assert_eq!(two_stats.details, vec![InterruptCounts::Samples(vec![678]),
+                                           InterruptCounts::Samples(vec![910])]);
         assert_eq!(two_stats.len(), 1);
     }
 
