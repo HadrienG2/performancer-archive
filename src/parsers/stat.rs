@@ -449,12 +449,13 @@ impl StatDataStore for CPUStatData {
         // This scope is needed to please rustc's current borrow checker
         {
             // This is how we parse the next duration from the input (if any)
+            let ticks_per_sec = *TICKS_PER_SEC;
+            let nanosecs_per_tick = *NANOSECS_PER_TICK;
             let mut next_stat = || -> Option<Duration> {
                 stats.next().map(|str_duration| -> Duration {
-                    let raw_ticks: u64 = str_duration.parse().unwrap();
-                    let secs = raw_ticks / *TICKS_PER_SEC;
-                    let nanosecs = (raw_ticks % *TICKS_PER_SEC)
-                                        * (1_000_000_000 / *TICKS_PER_SEC);
+                    let ticks: u64 = str_duration.parse().unwrap();
+                    let secs = ticks / ticks_per_sec;
+                    let nanosecs = (ticks % ticks_per_sec) * nanosecs_per_tick;
                     Duration::new(secs, nanosecs as u32)
                 })
             };
@@ -513,6 +514,9 @@ lazy_static! {
     static ref TICKS_PER_SEC: u64 = unsafe {
         libc::sysconf(libc::_SC_CLK_TCK) as u64
     };
+
+    /// Number of nanoseconds in one CPU tick
+    static ref NANOSECS_PER_TICK: u64 = 1_000_000_000 / *TICKS_PER_SEC;
 }
 
 
