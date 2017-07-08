@@ -543,9 +543,29 @@ impl StatDataStore for InterruptStatData {
         // Load the total interrupt count
         self.total.push(stats.next().unwrap().parse().unwrap());
 
+        // DEBUG: Experiment around faster interrupt count parsing
+        //
+        // On some platforms, there are a lot of hardware IRQs (456 on my x86
+        // machine), but most of them are unused and never fire.
+        //
+        // As a result, the interrupt statistics contain plenty of zeros, which
+        // stress the integer parser. By special-casing for them, a nice parsing
+        // speed improvement (~15%) can be obtained.
+        //
+        let fast_parse_u64 = |source: &str| -> u64 {
+            match source {
+                "0" => 0,
+                _ => source.parse().unwrap(),
+            }
+        };
+
         // Load the detailed interrupt counts from each source
         for detail in self.details.iter_mut() {
-            detail.push(stats.next().unwrap().parse().unwrap());
+            // TODO: I am now bottlenecked by pushing zeros into vectors.
+            // Investigate a compressed representation for sequences of zeros.
+            // I propose using for "details" an enum which is either a vector of
+            // samples or a counter of zeroes.
+            detail.push(fast_parse_u64(stats.next().unwrap()));
         }
 
         // At this point, we should have loaded all available stats
