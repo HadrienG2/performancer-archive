@@ -76,7 +76,7 @@ an API which is optimized for single-shot readout (as opposed to sampling).
 [ ] **/proc/sched_debug:** More detailed & less documented variant of schedstat.
 [ ] **/proc/slabinfo:** Root-only. Kernel memory allocator stats.
 [ ] **/proc/softirqs:** Software interrupt counters.
-[ ] **/proc/stat:** General system performance statistics, should probably be
+[X] **/proc/stat:** General system performance statistics, should probably be
     interfaced first due to its diverse contents & high usefulness.
 [ ] **/proc/swaps:** Usage of swap partitions, if any.
 [ ] **/proc/timer_list:** Usage of timer interrupts.
