@@ -140,6 +140,9 @@ studies in order to justify the cost of implementing a parser & API for them.
 * **/proc/<pid>/net/netfilter:** More netfilter stuff, currently just logs.
 * **/proc/<pid>/net/netlink:** List of active Netlink sockets, used by processes
   that wish to communicate with network drivers directly.
+* **/proc/<pid>/net/packet:** List of programs that can sniff network packets.
+* **/proc/<pid>/net/pnp:** Something related to DNS. Poorly documented across
+  the web, and seems broken on my machine (only reports nameserver 0.0.0.0).
 * **/proc/<pid>/ns:** Namespaces which a process belongs to.
 * **/proc/<pid>/numa_maps:** Some NUMA-related metadata on a process' virtual
   address space. Seems quite hard to interprete.
