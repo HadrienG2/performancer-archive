@@ -742,7 +742,39 @@ mod tests {
         assert_eq!(latest_stats.len(), 1);
     }
 
-    // TODO: Write unit tests for the InterruptCounts
+    // Check that initializing an interrupt count sampler works as expected
+    #[test]
+    fn init_interrupt_counts() {
+        let counts = InterruptCounts::new();
+        assert_eq!(counts, InterruptCounts::Zeroes(0));
+        assert_eq!(counts.len(), 0);
+    }
+
+    // Check that interrupt count sampling works as expected
+    #[test]
+    fn parse_interrupt_counts() {
+        // Adding one zero should keep us in the base "zeroes" state
+        let mut counts = InterruptCounts::new();
+        counts.push("0");
+        assert_eq!(counts, InterruptCounts::Zeroes(1));
+        assert_eq!(counts.len(), 1);
+
+        // Adding a nonzero value should get us out of this state
+        counts.push("123");
+        assert_eq!(counts, InterruptCounts::Samples(vec![0, 123]));
+        assert_eq!(counts.len(), 2);
+
+        // After that, sampling should work normally
+        counts.push("456");
+        assert_eq!(counts, InterruptCounts::Samples(vec![0, 123, 456]));
+        assert_eq!(counts.len(), 3);
+
+        // Sampling right from the start should work as well
+        let mut counts2 = InterruptCounts::new();
+        counts2.push("789");
+        assert_eq!(counts2, InterruptCounts::Samples(vec![789]));
+        assert_eq!(counts2.len(), 1);
+    }
 
     // Check that interrupt statistics initialization works as expected
     #[test]
