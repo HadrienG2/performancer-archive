@@ -1,5 +1,6 @@
 //! This module contains a sampling parser for /proc/meminfo
 
+use bytesize::ByteSize;
 use parsers::SplitSpace;
 
 // TODO: Mechanism for sampling measurements from /proc/meminfo
@@ -29,12 +30,11 @@ struct MemInfoData {
 
 /// Sampled records from /proc/meminfo, which can measure different things:
 enum MemInfoRecord {
-    // A volume of data in kibibytes (1 KiB = 1024 bytes)
-    // TODO: Investigate crates for handling data volumes
-    KiB(Vec<u64>),
+    // A volume of data
+    DataVolume(Vec<ByteSize>),
 
     // A raw counter of something (e.g. free huge pages)
-    Count(Vec<u64>),
+    Counter(Vec<u64>),
 
     // Something unsupported by this parser :-(
     Unsupported,
@@ -50,10 +50,10 @@ impl MemInfoRecord {
         // The number may or may not come with a suffix which clarifies its
         // semantics: is it just a raw counter, or some volume of data?
         match (number_parse_result, raw_data.next()) {
-            // It's a volume of data (and the kernel cannot be trusted on units)
+            // It's a volume of data (in KiB, don't trust the kernel's units...)
             (Ok(_), Some("kB")) => {
                 debug_assert_eq!(raw_data.next(), None);
-                MemInfoRecord::KiB(Vec::new())
+                MemInfoRecord::DataVolume(Vec::new())
             },
 
             // It's a raw counter without any special semantics attached to it
