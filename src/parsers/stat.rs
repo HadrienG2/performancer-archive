@@ -244,7 +244,7 @@ impl StatData {
                 },
                 StatDataMember::EachCPU => {
                     cpu_iter.next()
-                            .expect("Inconsistent amount of CPUs in self")
+                            .expect("Per-cpu stats do not match each_cpu.len()")
                             .push(stats);
                 },
                 StatDataMember::Paging => {
@@ -276,7 +276,8 @@ impl StatData {
         }
 
         // At the end of parsing, all CPU threads should have been considered
-        debug_assert!(cpu_iter.next().is_none());
+        debug_assert!(cpu_iter.next().is_none(),
+                      "Per-cpu stats do not match each_cpu.len()");
     }
 
     // Tell how many samples are present in the data store, and in debug mode
@@ -503,7 +504,8 @@ impl StatDataStore for CPUStatData {
         }
 
         // At this point, we should have loaded all available stats
-        debug_assert!(stats.next().is_none());
+        debug_assert!(stats.next().is_none(),
+                      "A CPU tick counter appeared out of nowhere");
     }
 
     // Tell how many samples are present in the data store
