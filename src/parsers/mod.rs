@@ -46,7 +46,10 @@ fn parse_duration_secs(input: &str) -> Duration {
                           "Only digits are expected after the decimal point");
             if decimals.len() > 9 { decimals = &decimals[0..9]; }
             let nanosecs_multiplier = 10u32.pow(9 - (decimals.len() as u32));
-            decimals.parse::<u32>().unwrap() * nanosecs_multiplier
+            let decimals_int =
+                decimals.parse::<u32>()
+                        .expect("Failed to parse the fractional seconds");
+            decimals_int * nanosecs_multiplier
         }
     };
 
