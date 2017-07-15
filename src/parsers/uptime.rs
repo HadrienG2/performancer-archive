@@ -59,16 +59,20 @@ impl UptimeData {
         // Load machine uptime and idle time
         let mut numbers_iter = file_contents.split_whitespace();
         self.wall_clock_uptime.push(
-            parsers::parse_duration_secs(numbers_iter.next().unwrap())
+            parsers::parse_duration_secs(
+                numbers_iter.next().expect("Machine uptime is missing")
+            )
         );
         self.cpu_idle_time.push(
-            parsers::parse_duration_secs(numbers_iter.next().unwrap())
+            parsers::parse_duration_secs(
+                numbers_iter.next().expect("Machine idle time is missing")
+            )
         );
 
         // If this debug assert fails, the contents of the file have been
         // extended by a kernel revision, and the parser should be updated
         debug_assert!(numbers_iter.next().is_none(),
-                      "Unsupported entry found in /proc/uptime!");
+                      "Unsupported entry found in /proc/uptime");
     }
 
     // Tell how many samples are present in the data store
@@ -112,7 +116,8 @@ mod tests {
     /// Check that initializing a sampler works
     #[test]
     fn init_sampler() {
-        let uptime = UptimeSampler::new().unwrap();
+        let uptime = UptimeSampler::new()
+                                   .expect("Failed to create uptime sampler");
         assert_eq!(uptime.samples.len(), 0);
     }
 
@@ -120,17 +125,18 @@ mod tests {
     #[test]
     fn basic_sampling() {
         // Create an uptime sampler
-        let mut uptime = UptimeSampler::new().unwrap();
+        let mut uptime =
+            UptimeSampler::new().expect("Failed to create uptime sampler");
 
         // Acquire a first sample
-        uptime.sample().unwrap();
+        uptime.sample().expect("Failed to sample uptime once");
         assert_eq!(uptime.samples.len(), 1);
 
         // Wait a bit
         thread::sleep(Duration::from_millis(50));
 
         // Acquire another sample
-        uptime.sample().unwrap();
+        uptime.sample().expect("Failed to sample uptime twice");
         assert_eq!(uptime.samples.len(), 2);
 
         // The uptime and idle time should have increased
@@ -156,9 +162,11 @@ mod benchmarks {
     #[test]
     #[ignore]
     fn readout_overhead() {
-        let mut reader = ProcFileReader::open("/proc/uptime").unwrap();
+        let mut reader =
+            ProcFileReader::open("/proc/uptime")
+                           .expect("Failed to access /proc/uptime");
         testbench::benchmark(3_000_000, || {
-            reader.sample(|_| {}).unwrap();
+            reader.sample(|_| {}).expect("Failed to sample uptime");
         });
     }
 
@@ -166,9 +174,10 @@ mod benchmarks {
     #[test]
     #[ignore]
     fn sampling_overhead() {
-        let mut uptime = UptimeSampler::new().unwrap();
+        let mut uptime =
+            UptimeSampler::new().expect("Failed to create uptime sampler");
         testbench::benchmark(3_000_000, || {
-            uptime.sample().unwrap();
+            uptime.sample().expect("Failed to sample uptime");
         });
     }
 }
