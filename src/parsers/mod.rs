@@ -191,7 +191,7 @@ mod tests {
         assert_eq!(split_two_words.next(), Some("43"));
         assert_eq!(split_two_words.next(), None);
 
-        // ...with trailing space
+        // ...with leading and trailing space
         let mut split_trailing_pair = SplitSpace::new("  42 43 ");
         assert_eq!(split_trailing_pair.next(), Some("42"));
         assert_eq!(split_trailing_pair.next(), Some("43"));
