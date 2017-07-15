@@ -122,7 +122,7 @@ impl StatData {
             let mut whitespace_iter = SplitSpace::new(line);
 
             // ...and check the header
-            match whitespace_iter.next().unwrap() {
+            match whitespace_iter.next().expect("Unexpected empty line") {
                 // Statistics on all CPUs (should come first)
                 "cpu" => {
                     num_cpu_timers = whitespace_iter.count() as u8;
@@ -133,7 +133,8 @@ impl StatData {
                 // Statistics on a specific CPU thread (should be consistent
                 // with the global stats and come after them)
                 header if &header[0..3] == "cpu" => {
-                    assert_eq!(whitespace_iter.count() as u8, num_cpu_timers);
+                    assert_eq!(whitespace_iter.count() as u8, num_cpu_timers,
+                               "Inconsistent amount of CPU timers");
                     data.each_cpu.push(CPUStatData::new(num_cpu_timers));
                     data.line_target.push(StatDataMember::EachCPU);
                 },
@@ -167,10 +168,16 @@ impl StatData {
 
                 // Boot time
                 "btime" => {
-                    let btime_str = whitespace_iter.next().unwrap();
-                    debug_assert_eq!(whitespace_iter.next(), None);
+                    let btime_str =
+                        whitespace_iter.next().expect("Missing boot time data");
+                    debug_assert_eq!(whitespace_iter.next(), None,
+                                     "Unexpected extra boot time data");
                     data.boot_time = Some(
-                        Utc.timestamp(btime_str.parse().unwrap(), 0)
+                        Utc.timestamp(
+                            btime_str.parse()
+                                     .expect("Boot time should be an integer"),
+                            0
+                        )
                     );
                     data.line_target.push(StatDataMember::BootTime);
                 },
@@ -236,7 +243,9 @@ impl StatData {
                     Self::force_push(&mut self.all_cpus, stats);
                 },
                 StatDataMember::EachCPU => {
-                    cpu_iter.next().unwrap().push(stats);
+                    cpu_iter.next()
+                            .expect("Inconsistent amount of CPUs in self")
+                            .push(stats);
                 },
                 StatDataMember::Paging => {
                     Self::force_push(&mut self.paging, stats);
@@ -276,8 +285,14 @@ impl StatData {
     fn len(&self) -> usize {
         let mut opt_len = None;
         Self::update_len(&mut opt_len, &self.all_cpus);
-        debug_assert!(self.each_cpu.iter()
-                                   .all(|cpu| cpu.len() == opt_len.unwrap()));
+        debug_assert!(
+            self.each_cpu
+                .iter()
+                .all(|cpu| {
+                    opt_len.expect("each_cpu should come with all_cpus") ==
+                        cpu.len()
+                })
+        );
         Self::update_len(&mut opt_len, &self.paging);
         Self::update_len(&mut opt_len, &self.swapping);
         Self::update_len(&mut opt_len, &self.interrupts);
@@ -294,7 +309,9 @@ impl StatData {
     fn force_push<T>(store: &mut Option<T>, stats: SplitSpace)
         where T: StatDataStore
     {
-        store.as_mut().unwrap().push(stats);
+        store.as_mut()
+             .expect("Attempted to push into a nonexistent container")
+             .push(stats);
     }
 
     // INTERNAL: Update our prior knowledge of the amount of stored samples
@@ -311,7 +328,8 @@ impl StatData {
             // If so, we only need to check if it is as expected, in debug mode
             Some(old_len) => {
                 if let Some(new_len) = get_len() {
-                    debug_assert_eq!(new_len, old_len);
+                    debug_assert_eq!(new_len, old_len,
+                                     "Inconsistent amounts of stored samples");
                 }
             },
 
@@ -361,8 +379,10 @@ impl<T, U> StatDataStore for Vec<T>
           U: Debug
 {
     fn push(&mut self, mut stats: SplitSpace) {
-        self.push(stats.next().unwrap().parse().unwrap());
-        debug_assert!(stats.next().is_none());
+        self.push(stats.next().expect("Expected statistical data")
+                       .parse().expect("Failed to parse statistical data"));
+        debug_assert!(stats.next().is_none(),
+                      "No other statistical data should be present");
     }
 
     fn len(&self) -> usize {
@@ -410,8 +430,8 @@ impl CPUStatData {
     /// Create new CPU statistics
     fn new(num_timers: u8) -> Self {
         // Check if we know about all CPU timers
-        debug_assert!(num_timers >= 4, "Not expected from man 5 proc!");
-        debug_assert!(num_timers <= 10, "Unknown CPU timers detected!");
+        debug_assert!(num_timers >= 4, "Some expected CPU timers are missing");
+        debug_assert!(num_timers <= 10, "Unknown CPU timers detected");
 
         // Prepare to conditionally create a certain amount of timing Vecs
         let mut created_vecs = 4;
@@ -453,7 +473,9 @@ impl StatDataStore for CPUStatData {
             let nanosecs_per_tick = *NANOSECS_PER_TICK;
             let mut next_stat = || -> Option<Duration> {
                 stats.next().map(|str_duration| -> Duration {
-                    let ticks: u64 = str_duration.parse().unwrap();
+                    let ticks: u64 =
+                        str_duration.parse()
+                                    .expect("Failed to parse CPU tick counter");
                     let secs = ticks / ticks_per_sec;
                     let nanosecs = (ticks % ticks_per_sec) * nanosecs_per_tick;
                     Duration::new(secs, nanosecs as u32)
@@ -461,15 +483,15 @@ impl StatDataStore for CPUStatData {
             };
 
             // Load the "mandatory" CPU statistics
-            self.user_time.push(next_stat().unwrap());
-            self.nice_time.push(next_stat().unwrap());
-            self.system_time.push(next_stat().unwrap());
-            self.idle_time.push(next_stat().unwrap());
+            self.user_time.push(next_stat().expect("User time missing"));
+            self.nice_time.push(next_stat().expect("Nice time missing"));
+            self.system_time.push(next_stat().expect("System time missing"));
+            self.idle_time.push(next_stat().expect("Idle time missing"));
 
             // Load the "optional" CPU statistics
             let mut load_optional_stat = |stat: &mut Option<Vec<Duration>>| {
                 if let Some(ref mut vec) = *stat {
-                    vec.push(next_stat().unwrap());
+                    vec.push(next_stat().expect("A CPU timer went missing"));
                 }
             };
             load_optional_stat(&mut self.io_wait_time);
@@ -545,15 +567,17 @@ impl StatDataStore for InterruptStatData {
     /// Parse interrupt statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitSpace) {
         // Load the total interrupt count
-        self.total.push(stats.next().unwrap().parse().unwrap());
+        self.total.push(stats.next().expect("Total IRQ count missing")
+                             .parse().expect("Failed to parse IRQ count"));
 
         // Load the detailed interrupt counts from each source
         for detail in self.details.iter_mut() {
-            detail.push(stats.next().unwrap());
+            detail.push(stats.next().expect("An IRQ counter went missing"));
         }
 
         // At this point, we should have loaded all available stats
-        debug_assert!(stats.next().is_none());
+        debug_assert!(stats.next().is_none(),
+                      "An IRQ counter appeared out of nowhere");
     }
 
     // Tell how many samples are present in the data store
@@ -597,14 +621,17 @@ impl InterruptCounts {
                 } else {
                     // If not, move to regular interrupt count sampling
                     let mut samples = vec![0; zero_count];
-                    samples.push(intr_count.parse().unwrap());
+                    samples.push(
+                        intr_count.parse().expect("Failed to parse IRQ count")
+                    );
                     *self = InterruptCounts::Samples(samples);
                 }
             },
 
             // If the interrupt counter is nonzero, sample it normally
             InterruptCounts::Samples(ref mut vec) => {
-                vec.push(intr_count.parse().unwrap());
+                vec.push(intr_count.parse()
+                                   .expect("Failed to parse IRQ count"));
             }
         }
     }
@@ -643,11 +670,14 @@ impl StatDataStore for PagingStatData {
     /// Parse paging statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitSpace) {
         // Load the incoming and outgoing page count
-        self.incoming.push(stats.next().unwrap().parse().unwrap());
-        self.outgoing.push(stats.next().unwrap().parse().unwrap());
+        self.incoming.push(stats.next().expect("Missing incoming page count")
+                                .parse().expect("Could not parse page count"));
+        self.outgoing.push(stats.next().expect("Missing outgoing page count")
+                                .parse().expect("Could not parse page count"));
 
         // At this point, we should have loaded all available stats
-        debug_assert!(stats.next().is_none());
+        debug_assert!(stats.next().is_none(),
+                      "Unexpected counter in paging statistics");
     }
 
     // Tell how many samples are present in the data store
@@ -964,7 +994,9 @@ mod tests {
         let mut global_cpu_stats = StatData::new(&stats);
         global_cpu_stats.push(&stats);
         expected = StatData::new(&stats);
-        expected.all_cpus.as_mut().unwrap().push(SplitSpace::new("1 2 3 4"));
+        expected.all_cpus.as_mut()
+                         .expect("CPU stats incorrectly marked as missing")
+                         .push(SplitSpace::new("1 2 3 4"));
         assert_eq!(global_cpu_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -974,7 +1006,9 @@ mod tests {
         let mut local_cpu_stats = StatData::new(&stats);
         local_cpu_stats.push(&stats);
         expected = StatData::new(&stats);
-        expected.all_cpus.as_mut().unwrap().push(SplitSpace::new("1 2 3 4"));
+        expected.all_cpus.as_mut()
+                         .expect("CPU stats incorrectly marked as missing")
+                         .push(SplitSpace::new("1 2 3 4"));
         expected.each_cpu[0].push(SplitSpace::new("0 1 1 3"));
         expected.each_cpu[1].push(SplitSpace::new("1 1 2 1"));
         assert_eq!(local_cpu_stats, expected);
@@ -985,7 +1019,9 @@ mod tests {
         let mut paging_stats = StatData::new(&stats);
         paging_stats.push(&stats);
         expected = StatData::new(&stats);
-        expected.paging.as_mut().unwrap().push(SplitSpace::new("42 43"));
+        expected.paging.as_mut()
+                       .expect("Paging stats incorrectly marked as missing")
+                       .push(SplitSpace::new("42 43"));
         assert_eq!(paging_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -994,7 +1030,8 @@ mod tests {
         let mut softirq_stats = StatData::new(&stats);
         softirq_stats.push(&stats);
         expected = StatData::new(&stats);
-        expected.softirqs.as_mut().unwrap()
+        expected.softirqs.as_mut()
+                         .expect("Softirq stats incorrectly marked as missing")
                          .push(SplitSpace::new("94651 1561 21211 12 71867"));
         assert_eq!(softirq_stats, expected);
         assert_eq!(expected.len(), 1);
@@ -1003,17 +1040,21 @@ mod tests {
     // Check that sampler initialization works well
     #[test]
     fn init_sampler() {
-        let stats = StatSampler::new().unwrap();
+        let stats =
+            StatSampler::new()
+                        .expect("Failed to create a /proc/stat sampler");
         assert_eq!(stats.samples.len(), 0);
     }
 
     // Check that basic sampling works as expected
     #[test]
     fn basic_sampling() {
-        let mut stats = StatSampler::new().unwrap();
-        stats.sample().unwrap();
+        let mut stats =
+            StatSampler::new()
+                        .expect("Failed to create a /proc/stat sampler");
+        stats.sample().expect("Failed to sample stats once");
         assert_eq!(stats.samples.len(), 1);
-        stats.sample().unwrap();
+        stats.sample().expect("Failed to sample stats twice");
         assert_eq!(stats.samples.len(), 2);
     }
 }
@@ -1033,9 +1074,10 @@ mod benchmarks {
     #[test]
     #[ignore]
     fn readout_overhead() {
-        let mut reader = ProcFileReader::open("/proc/stat").unwrap();
+        let mut reader = ProcFileReader::open("/proc/stat")
+                                        .expect("Failed to open /proc/stat");
         testbench::benchmark(100_000, || {
-            reader.sample(|_| {}).unwrap();
+            reader.sample(|_| {}).expect("Failed to read /proc/stat");
         });
     }
 
@@ -1043,9 +1085,11 @@ mod benchmarks {
     #[test]
     #[ignore]
     fn sampling_overhead() {
-        let mut stat = StatSampler::new().unwrap();
+        let mut stat =
+            StatSampler::new()
+                        .expect("Failed to create a /proc/stat sampler");
         testbench::benchmark(100_000, || {
-            stat.sample().unwrap();
+            stat.sample().expect("Failed to sample /proc/stat");
         });
     }
 }
