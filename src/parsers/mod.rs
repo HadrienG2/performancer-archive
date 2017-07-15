@@ -29,29 +29,30 @@ fn parse_duration_secs(input: &str) -> Duration {
     // Separate the integral part from the fractional part (if any)
     let mut integer_iter = input.split('.');
 
-    // Parse the number of full seconds
-    let seconds = integer_iter.next().unwrap()
-                              .parse::<u64>().unwrap();
+    // Parse the number of whole seconds
+    let seconds
+        = integer_iter.next().expect("Input string should not be empty")
+                      .parse::<u64>().expect("Input should parse as seconds");
 
     // Parse the number of extra nanoseconds, if any
     let nanoseconds = match integer_iter.next() {
-        // Handle the "XXXX." syntax used by some text printers
-        Some("")       => 0,
+        // No decimals means no nanoseconds. Allow for a trailing decimal point.
+        Some("") | None    => 0,
 
         // If there is something after the ., assume it is decimals. Sub nano-
-        // second decimals will be truncated: we only count whole nanoseconds.
+        // second decimals will be truncated: Rust only understands nanosecs.
         Some(mut decimals) => {
+            assert!(decimals.chars().all(|c| c.is_digit(10)),
+                    "Only digits are expected after the decimal point");
             if decimals.len() > 9 { decimals = &decimals[0..9]; }
             let nanosecs_multiplier = 10u32.pow(9 - (decimals.len() as u32));
             decimals.parse::<u32>().unwrap() * nanosecs_multiplier
         }
-
-        // No decimals means no nanoseconds
-        None           => 0,
     };
 
     // At this point, we should be at the end of the string
-    debug_assert_eq!(integer_iter.next(), None);
+    debug_assert_eq!(integer_iter.next(), None,
+                     "Unexpected input found at end of the duration string");
 
     // Return the Duration that we just parsed
     Duration::new(seconds, nanoseconds)
