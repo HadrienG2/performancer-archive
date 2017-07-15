@@ -91,28 +91,33 @@ mod tests {
     /// Check that opening /proc/uptime works as expected
     #[test]
     fn open_file() {
-        let _ = ProcFileReader::open("/proc/uptime").unwrap();
+        let _ = ProcFileReader::open("/proc/uptime")
+                               .expect("Should be able to open /proc/uptime");
     }
 
     /// Check that two uptime measurements separated by some sleep differ
     #[test]
     fn uptime_sampling() {
         // Open the uptime file
-        let mut reader = ProcFileReader::open("/proc/uptime").unwrap();
+        let mut reader =
+            ProcFileReader::open("/proc/uptime")
+                           .expect("Should be able to open /proc/uptime");
 
         // Read its contents once
         let mut meas1 = String::new();
-        reader.sample(|text| meas1.push_str(text)).unwrap();
+        reader.sample(|text| meas1.push_str(text))
+              .expect("Should be able to read uptime once");
 
         // Wait a bit
         thread::sleep(Duration::from_millis(50));
 
         // Read its contents again
         let mut meas2 = String::new();
-        reader.sample(|text| meas2.push_str(text)).unwrap();
+        reader.sample(|text| meas2.push_str(text))
+              .expect("Should be able to read uptime twice");
 
         // The contents should have changed
-        assert!(meas1 != meas2);
+        assert!(meas1 != meas2, "Uptime should change over time");
     }
 }
 
