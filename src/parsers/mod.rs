@@ -42,8 +42,8 @@ fn parse_duration_secs(input: &str) -> Duration {
         // If there is something after the ., assume it is decimals. Sub nano-
         // second decimals will be truncated: Rust only understands nanosecs.
         Some(mut decimals) => {
-            assert!(decimals.chars().all(|c| c.is_digit(10)),
-                    "Only digits are expected after the decimal point");
+            debug_assert!(decimals.chars().all(|c| c.is_digit(10)),
+                          "Only digits are expected after the decimal point");
             if decimals.len() > 9 { decimals = &decimals[0..9]; }
             let nanosecs_multiplier = 10u32.pow(9 - (decimals.len() as u32));
             decimals.parse::<u32>().unwrap() * nanosecs_multiplier
