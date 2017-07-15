@@ -11,7 +11,9 @@ use std::io::{Read, Result};
 
 lazy_static! {
     /// We should only need to parse the host's kernel version once
-    pub static ref LINUX_VERSION: LinuxVersion = LinuxVersion::load().unwrap();
+    pub static ref LINUX_VERSION: LinuxVersion =
+        LinuxVersion::load()
+                     .expect("Failed to load the host's kernel version");
 }
 
 
@@ -35,7 +37,7 @@ pub struct LinuxVersion {
     /// Distribution-specific versioning information and kernel flavours.
     /// Parsing this further would require an extensive study of ditributions'
     /// kernel versioning schemes, which I am not ready to carry out right now.
-    /// So as a stopgap solution, this is not yet part of the public interface.
+    /// As a stopgap solution, this is not yet part of the public interface.
     distro_flavour: Option<String>,
 
     /// Build information (host, compiler, date...) is not parsed either, since
@@ -77,21 +79,30 @@ impl LinuxVersion {
 
     // INTERNAL: Parse the (trimmed) contents of /proc/version
     fn parse(trimmed_version: &str) -> Self {
-        // This library only supports Linux's flavour of procfs
-        assert_eq!(&trimmed_version[0..5], "Linux");
+        // Make sure that we are running on Linux
+        assert_eq!(&trimmed_version[0..5], "Linux",
+                   "This library only supports Linux's flavour of procfs");
 
-        // Ultimately, the contents of /proc/version should match this regex
-        let version_regex = Regex::new(r"^Linux version (?P<major>[1-9]\d*)\.(?P<minor>\d+)(?:\.(?P<bugfix>\d+))?(?:-(?P<distro_flavour>\S+))? (?P<build_info>.+)$").unwrap();
-        let captures = version_regex.captures(trimmed_version).unwrap();
+        // The contents of /proc/version should match this regex
+        let version_regex = Regex::new(r"^Linux version (?P<major>[1-9]\d*)\.(?P<minor>\d+)(?:\.(?P<bugfix>\d+))?(?:-(?P<distro_flavour>\S+))? (?P<build_info>.+)$")
+                                  .expect("Failed to compile the regex");
+        let captures = version_regex.captures(trimmed_version)
+                                    .expect("Failed to parse /proc/version");
 
         // Return the parsed kernel version
         Self {
-            major: captures["major"].parse().unwrap(),
-            minor: captures["minor"].parse().unwrap(),
-            bugfix: captures.name("bugfix")
-                            .map_or(0, |m| m.as_str().parse().unwrap()),
+            major: captures["major"].parse()
+                                    .expect("Failed to parse major version"),
+            minor: captures["minor"].parse()
+                                    .expect("Failed to parse minor version"),
+            bugfix:
+                captures.name("bugfix")
+                        .map_or(0,
+                               |m| m.as_str()
+                                    .parse()
+                                    .expect("Failed to parse bugfix version")),
             distro_flavour: captures.name("distro_flavour")
-                                    .map(|m| m.as_str().parse().unwrap()),
+                                    .map(|m| m.as_str().to_owned()),
             build_info: captures["build_info"].to_owned(),
         }
     }
@@ -158,7 +169,9 @@ mod tests {
     /// Check that reading the kernel version string of the host works
     #[test]
     fn load_host_version() {
-        assert_eq!(*LINUX_VERSION, LinuxVersion::load().unwrap());
+        assert_eq!(LinuxVersion::load().expect("Failed to load kernel version"),
+                   *LINUX_VERSION,
+                   "Loaded kernel version should match our public static");
     }
 
     /// Check that kernel version compatibility checks work
