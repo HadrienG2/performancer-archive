@@ -85,7 +85,7 @@ impl UptimeData {
 }
 
 
-/// These are the unit tests for this module
+/// Unit tests
 #[cfg(test)]
 mod tests {
     use std::thread;

@@ -132,7 +132,7 @@ impl<'a> Iterator for SplitSpace<'a> {
 }
 
 
-/// These are the unit tests for this module
+/// Unit tests
 #[cfg(test)]
 mod tests {
     use super::SplitSpace;

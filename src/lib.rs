@@ -17,6 +17,8 @@ use std::io::{Read, Result, Seek, SeekFrom};
 use std::path::Path;
 
 
+/// Sampling-oriented reader for procfs pseudo-files
+///
 /// Pseudo-files from /proc have a number of characteristics which this custom
 /// reader is designed to account for:
 ///
@@ -81,7 +83,7 @@ impl ProcFileReader {
 }
 
 
-/// These are the unit tests for this module
+/// Unit tests
 #[cfg(test)]
 mod tests {
     use std::thread;
