@@ -122,7 +122,7 @@ impl StatDataStore for CPUStatData {
 
         // At this point, we should have loaded all available stats
         debug_assert!(stats.next().is_none(),
-                      "A CPU tick counter appeared out of nowhere");
+                      "A CPU timer appeared out of nowhere");
     }
 
     // Tell how many samples are present in the data store
