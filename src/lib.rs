@@ -2,7 +2,8 @@
 //!
 //! Its main design goal is to allow taking periodical measurements of system
 //! activity, as described by the Linux kernel's procfs API, at a relatively
-//! high rate (at least 1 kHz), for the purpose of performance analysis.
+//! high rate (up to 1 kHz) and with low CPU overhead (down to 0.1%), for the
+//! purpose of performance analysis.
 
 extern crate chrono;
 #[macro_use] extern crate lazy_static;
