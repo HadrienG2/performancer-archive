@@ -1,34 +1,119 @@
 //! This module contains a sampling parser for /proc/meminfo
 
+use ::ProcFileReader;
 use bytesize::ByteSize;
 use parsers::SplitSpace;
+use std::collections::HashMap;
+use std::io::Result;
 
-// TODO: Mechanism for sampling measurements from /proc/meminfo
-// TODO: Data samples from /proc/meminfo, in structure-of-array layout
 
+/// Mechanism for sampling measurements from /proc/meminfo
+pub struct MemInfoSampler {
+    /// Reader object for /proc/stat
+    reader: ProcFileReader,
+
+    /// Sampled statistical data
+    samples: MemInfoData,
+}
+//
+impl MemInfoSampler {
+    /// Create a new sampler of /proc/stat
+    pub fn new() -> Result<Self> {
+        let mut reader = ProcFileReader::open("/proc/meminfo")?;
+        let mut first_readout = String::new();
+        reader.sample(|file_contents| first_readout.push_str(file_contents))?;
+        Ok(
+            Self {
+                reader,
+                samples: MemInfoData::new(&first_readout),
+            }
+        )
+    }
+
+    // TODO: Acquire a new sample of statistical data
+    /* pub fn sample(&mut self) -> Result<()> {
+        let samples = &mut self.samples;
+        self.reader.sample(|file_contents: &str| samples.push(file_contents))
+    } */
+
+    // TODO: Add accessors to the inner stat data + associated tests
+}
+
+
+/// Data samples from /proc/meminfo, in structure-of-array layout
+///
 /// As /proc/meminfo is basically a (large) set of named data volumes and
 /// performance counters, it maps very well to a homogeneous collection (with
-/// just an enum inside to disambiguate between both).
+/// just an enum inside to disambiguate between volumes and counters).
 ///
 /// There is, however, a catch: for fast sampling, we want to be able to iterate
 /// over the records in the order in which they appear in /proc/meminfo. But for
 /// fast lookup, we want to be able to quickly find a certain entry. We resolve
 /// this dilemma by using a Vec for fast ordered access to the measurements
-/// during sampling, and a HashSet index for fast unordered lookup.
+/// during sampling, and a HashSet index for fast key lookup.
 ///
+#[derive(Debug, PartialEq)]
 struct MemInfoData {
     // Sampled meminfo records, in the order in which they appear in the file
     records: Vec<MemInfoRecord>,
 
-    // Unordered index into the meminfo records
-    // TODO: Is this really right from an ownership PoV?
-    //       And if not, where should the keys go?
-    index: HashMap<&str, usize>,
+    // Hashed index mapping the meminfo keys to the associated records above
+    index: HashMap<String, usize>,
 }
-// TODO: Impl this... and report unsupported fields in debug mode!
+//
+impl MemInfoData {
+    /// Create a new memory info data store, using a first sample to know the
+    /// structure of /proc/meminfo on this system
+    fn new(initial_contents: &str) -> Self {
+        // Our data store will eventually go there
+        let mut data = Self {
+            records: Vec::new(),
+            index: HashMap::new(),
+        };
+
+        // For each line of the initial content of /proc/meminfo...
+        for line in initial_contents.lines() {
+            // ...decompose according to whitespace...
+            let mut whitespace_iter = SplitSpace::new(line);
+
+            // ...and check that the header has the expected format. It should
+            // consist of a non-empty string key, followed by a colon, which we
+            // shall get rid of along the way.
+            let mut header = whitespace_iter.next()
+                                            .expect("Unexpected empty line")
+                                            .to_owned();
+            assert_eq!(header.pop(), Some(':'),
+                       "meminfo headers should end with a colon");
+
+            // Build a record for this line of /proc/meminfo
+            let record = MemInfoRecord::new(whitespace_iter);
+
+            // Report unsupported records in debug mode
+            debug_assert!(record != MemInfoRecord::Unsupported,
+                          "Missing support for meminfo record named {}",
+                          header);
+
+            // Store record in our internal data store and index it
+            let record_index = data.records.len();
+            data.records.push(record);
+            let duplicate_entry = data.index.insert(header, record_index);
+
+            // No pair of entries in /proc/meminfo should have the same name
+            assert_eq!(duplicate_entry, None,
+                       "Duplicated meminfo entry detected");
+        }
+
+        // Return our data collection setup
+        data
+    }
+
+    // TODO: Add a way to push data in
+    // TODO: Tell how many samples are present & check consistency
+}
 
 
 /// Sampled records from /proc/meminfo, which can measure different things:
+#[derive(Debug, PartialEq)]
 enum MemInfoRecord {
     // A volume of data
     DataVolume(Vec<ByteSize>),
@@ -57,7 +142,7 @@ impl MemInfoRecord {
             },
 
             // It's a raw counter without any special semantics attached to it
-            (Ok(_), None) => MemInfoRecord::Count(Vec::new()),
+            (Ok(_), None) => MemInfoRecord::Counter(Vec::new()),
 
             // It's something we don't know how to parse
             _ => MemInfoRecord::Unsupported,
@@ -65,7 +150,24 @@ impl MemInfoRecord {
     }
 }
 
-// TODO: Unit tests for this module
+
+/// Unit tests
+#[cfg(test)]
+mod tests {
+    use super::{MemInfoSampler};
+
+    // Check that sampler initialization works well
+    #[test]
+    fn init_sampler() {
+        let stats =
+            MemInfoSampler::new()
+                           .expect("Failed to create a /proc/meminfo sampler");
+        println!("{:?}", stats.samples);
+    }
+
+    // TODO: Add a lot more tests
+}
+
 
 /// Performance benchmarks
 ///
