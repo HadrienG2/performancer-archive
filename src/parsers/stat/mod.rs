@@ -55,7 +55,7 @@ impl StatSampler {
 /// depending on kernel configuration, most entries of this struct are
 /// considered optional at this point...
 ///
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, PartialEq)]
 struct StatData {
     /// Total CPU usage stats, aggregated across all hardware threads
     all_cpus: Option<CPUStatData>,
@@ -116,14 +116,27 @@ impl StatData {
     /// structure of /proc/stat on this system
     fn new(initial_contents: &str) -> Self {
         // Our statistical data store will eventually go there
-        let mut data: Self = Default::default();
+        let mut data = Self {
+            all_cpus: None,
+            each_cpu: Vec::new(),
+            paging: None,
+            swapping: None,
+            interrupts: None,
+            context_switches: None,
+            boot_time: None,
+            process_forks: None,
+            runnable_processes: None,
+            blocked_processes: None,
+            softirqs: None,
+            line_target: Vec::new(),
+        };
 
         // The amount of CPU timers will go there once it's known
         let mut num_cpu_timers = 0u8;
 
         // For each line of the initial contents of /proc/stat...
         for line in initial_contents.lines() {
-            // ...decompose according whitespace...
+            // ...decompose according to whitespace...
             let mut whitespace_iter = SplitSpace::new(line);
 
             // ...and check the header
