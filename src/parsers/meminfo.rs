@@ -89,7 +89,7 @@ impl MemInfoData {
             let record = MemInfoRecord::new(whitespace_iter);
 
             // Report unsupported records in debug mode
-            debug_assert!(record != MemInfoRecord::Unsupported,
+            debug_assert!(record != MemInfoRecord::Unsupported(0),
                           "Missing support for meminfo record named {}",
                           header);
 
@@ -108,7 +108,20 @@ impl MemInfoData {
     }
 
     // TODO: Add a way to push data in
-    // TODO: Tell how many samples are present & check consistency
+
+    // Tell how many samples are present in the data store, and in debug mode
+    // check for internal data store consistency
+    #[allow(dead_code)]
+    fn len(&self) -> usize {
+        // We'll return the length of the first record, if any, or else zero
+        let length = self.records.first().map_or(0, |rec| rec.len());
+
+        // In debug mode, check that all records have the same length
+        debug_assert!(self.records.iter().all(|rec| rec.len() == length));
+
+        // Return the number of samples in the data store
+        length
+    }
 }
 
 
@@ -122,7 +135,11 @@ enum MemInfoRecord {
     Counter(Vec<u64>),
 
     // Something unsupported by this parser :-(
-    Unsupported,
+    //
+    // When we encounter this case, we just count the amount of samples that we
+    // encountered. It makes things easier, and won't make the enum any larger.
+    //
+    Unsupported(usize),
 }
 //
 impl MemInfoRecord {
@@ -130,7 +147,9 @@ impl MemInfoRecord {
     fn new(mut raw_data: SplitSpace) -> Self {
         // The raw data should start with a numerical field. Make sure that we
         // can parse it. Otherwise, we don't support the associated content.
-        let number_parse_result = raw_data.next().unwrap().parse::<u64>();
+        let number_parse_result = raw_data.next()
+                                          .expect("Unexpected blank record")
+                                          .parse::<u64>();
 
         // The number may or may not come with a suffix which clarifies its
         // semantics: is it just a raw counter, or some volume of data?
@@ -145,7 +164,19 @@ impl MemInfoRecord {
             (Ok(_), None) => MemInfoRecord::Counter(Vec::new()),
 
             // It's something we don't know how to parse
-            _ => MemInfoRecord::Unsupported,
+            _ => MemInfoRecord::Unsupported(0),
+        }
+    }
+
+    // TODO: Add a way to push data in
+
+    /// Tell how many samples are present in the data store
+    #[allow(dead_code)]
+    fn len(&self) -> usize {
+        match *self {
+            MemInfoRecord::DataVolume(ref v)  => v.len(),
+            MemInfoRecord::Counter(ref v)     => v.len(),
+            MemInfoRecord::Unsupported(count) => count,
         }
     }
 }
@@ -154,7 +185,30 @@ impl MemInfoRecord {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::{MemInfoSampler};
+    use super::{MemInfoRecord, MemInfoSampler, SplitSpace};
+
+    // Check that meminfo record initialization works well
+    #[test]
+    fn init_record() {
+        // Data volume record
+        let data_volume_record = MemInfoRecord::new(SplitSpace::new("42 kB"));
+        assert_eq!(data_volume_record, MemInfoRecord::DataVolume(Vec::new()));
+        assert_eq!(data_volume_record.len(), 0);
+
+        // Counter record
+        let counter_record = MemInfoRecord::new(SplitSpace::new("713705"));
+        assert_eq!(counter_record, MemInfoRecord::Counter(Vec::new()));
+        assert_eq!(counter_record.len(), 0);
+
+        // Unsupported record
+        let unsupported_record = MemInfoRecord::new(SplitSpace::new("73 MiB"));
+        assert_eq!(unsupported_record, MemInfoRecord::Unsupported(0));
+        assert_eq!(unsupported_record.len(), 0);
+    }
+
+    // TODO: Check that meminfo record parsing works well
+    // TODO: Check that meminfo data initialization works well
+    // TODO: Check that meminfo data parsing works well
 
     // Check that sampler initialization works well
     #[test]
@@ -162,10 +216,10 @@ mod tests {
         let stats =
             MemInfoSampler::new()
                            .expect("Failed to create a /proc/meminfo sampler");
-        println!("{:?}", stats.samples);
+        assert_eq!(stats.samples.len(), 0);
     }
 
-    // TODO: Add a lot more tests
+    // TODO: Check that basic sampling works as expected
 }
 
 
@@ -182,9 +236,11 @@ mod benchmarks {
     #[test]
     #[ignore]
     fn readout_overhead() {
-        let mut reader = ProcFileReader::open("/proc/meminfo").unwrap();
+        let mut reader =
+            ProcFileReader::open("/proc/meminfo")
+                           .expect("Failed to open /proc/meminfo");
         testbench::benchmark(400_000, || {
-            reader.sample(|_| {}).unwrap();
+            reader.sample(|_| {}).expect("Failed to read /proc/meminfo");
         });
     }
 
