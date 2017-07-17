@@ -168,7 +168,31 @@ impl MemInfoRecord {
         }
     }
 
-    // TODO: Add a way to push data in
+    // Push new data inside of the record
+    fn push(&mut self, mut raw_data: SplitSpace) {
+        // Use our knowledge from the first parse to tell what this should be
+        match *self {
+            // A data volume in kibibytes
+            MemInfoRecord::DataVolume(ref mut v) => {
+                let data_volume = ByteSize::kib(
+                    raw_data.next().expect("Unexpected empty record")
+                            .parse().expect("Failed to parse data volume")
+                );
+                v.push(data_volume);
+            },
+
+            // A raw counter
+            MemInfoRecord::Counter(ref mut v) => {
+                v.push(raw_data.next().expect("Unexpected empty record")
+                               .parse().expect("Failed to parse counter"));
+            },
+
+            // Something unknown and mysterious
+            MemInfoRecord::Unsupported(ref mut count) => {
+                *count += 1;
+            },
+        }
+    }
 
     /// Tell how many samples are present in the data store
     #[allow(dead_code)]
