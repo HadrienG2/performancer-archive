@@ -30,8 +30,8 @@ impl MemInfoSampler {
         )
     }
 
-    // TODO: Acquire a new sample of statistical data
-    /* pub fn sample(&mut self) -> Result<()> {
+    /* /// TODO: Acquire a new sample of statistical data
+    pub fn sample(&mut self) -> Result<()> {
         let samples = &mut self.samples;
         self.reader.sample(|file_contents: &str| samples.push(file_contents))
     } */
@@ -54,10 +54,10 @@ impl MemInfoSampler {
 ///
 #[derive(Debug, PartialEq)]
 struct MemInfoData {
-    // Sampled meminfo records, in the order in which they appear in the file
+    /// Sampled meminfo records, in the order in which they appear in the file
     records: Vec<MemInfoRecord>,
 
-    // Hashed index mapping the meminfo keys to the associated records above
+    /// Hashed index mapping the meminfo keys to the associated records above
     index: HashMap<String, usize>,
 }
 //
@@ -109,8 +109,8 @@ impl MemInfoData {
 
     // TODO: Add a way to push data in
 
-    // Tell how many samples are present in the data store, and in debug mode
-    // check for internal data store consistency
+    /// Tell how many samples are present in the data store, and in debug mode
+    /// check for internal data store consistency
     #[allow(dead_code)]
     fn len(&self) -> usize {
         // We'll return the length of the first record, if any, or else zero
@@ -128,22 +128,22 @@ impl MemInfoData {
 /// Sampled records from /proc/meminfo, which can measure different things:
 #[derive(Debug, PartialEq)]
 enum MemInfoRecord {
-    // A volume of data
+    /// A volume of data
     DataVolume(Vec<ByteSize>),
 
-    // A raw counter of something (e.g. free huge pages)
+    /// A raw counter of something (e.g. free huge pages)
     Counter(Vec<u64>),
 
-    // Something unsupported by this parser :-(
-    //
-    // When we encounter this case, we just count the amount of samples that we
-    // encountered. It makes things easier, and won't make the enum any larger.
-    //
+    /// Something unsupported by this parser :-(
+    ///
+    /// When we encounter this case, we just count the amount of samples that we
+    /// encountered. It makes things easier, and won't make the enum any larger.
+    ///
     Unsupported(usize),
 }
 //
 impl MemInfoRecord {
-    // Create a new record, choosing the type based on some raw data
+    /// Create a new record, choosing the type based on some raw data
     fn new(mut raw_data: SplitSpace) -> Self {
         // The raw data should start with a numerical field. Make sure that we
         // can parse it. Otherwise, we don't support the associated content.
@@ -168,23 +168,32 @@ impl MemInfoRecord {
         }
     }
 
-    // Push new data inside of the record
+    /// Push new data inside of the record
     fn push(&mut self, mut raw_data: SplitSpace) {
         // Use our knowledge from the first parse to tell what this should be
         match *self {
             // A data volume in kibibytes
             MemInfoRecord::DataVolume(ref mut v) => {
+                // Parse and record the data volume
                 let data_volume = ByteSize::kib(
                     raw_data.next().expect("Unexpected empty record")
                             .parse().expect("Failed to parse data volume")
                 );
                 v.push(data_volume);
+
+                // Check that meminfo schema hasn't changed in debug mode
+                debug_assert_eq!(raw_data.next(), Some("kB"));
+                debug_assert_eq!(raw_data.next(), None);
             },
 
             // A raw counter
             MemInfoRecord::Counter(ref mut v) => {
+                // Parse and record the counter's value
                 v.push(raw_data.next().expect("Unexpected empty record")
                                .parse().expect("Failed to parse counter"));
+
+                // Check that meminfo schema hasn't changed in debug mode
+                debug_assert_eq!(raw_data.next(), None);
             },
 
             // Something unknown and mysterious
@@ -209,15 +218,15 @@ impl MemInfoRecord {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::{MemInfoRecord, MemInfoSampler, SplitSpace};
+    use super::{ByteSize, MemInfoRecord, MemInfoSampler, SplitSpace};
 
-    // Check that meminfo record initialization works well
+    /// Check that meminfo record initialization works well
     #[test]
     fn init_record() {
         // Data volume record
-        let data_volume_record = MemInfoRecord::new(SplitSpace::new("42 kB"));
-        assert_eq!(data_volume_record, MemInfoRecord::DataVolume(Vec::new()));
-        assert_eq!(data_volume_record.len(), 0);
+        let data_vol_record = MemInfoRecord::new(SplitSpace::new("42 kB"));
+        assert_eq!(data_vol_record, MemInfoRecord::DataVolume(Vec::new()));
+        assert_eq!(data_vol_record.len(), 0);
 
         // Counter record
         let counter_record = MemInfoRecord::new(SplitSpace::new("713705"));
@@ -225,16 +234,38 @@ mod tests {
         assert_eq!(counter_record.len(), 0);
 
         // Unsupported record
-        let unsupported_record = MemInfoRecord::new(SplitSpace::new("73 MiB"));
-        assert_eq!(unsupported_record, MemInfoRecord::Unsupported(0));
-        assert_eq!(unsupported_record.len(), 0);
+        let bad_record = MemInfoRecord::new(SplitSpace::new("73 MiB"));
+        assert_eq!(bad_record, MemInfoRecord::Unsupported(0));
+        assert_eq!(bad_record.len(), 0);
     }
 
-    // TODO: Check that meminfo record parsing works well
+    /// Check that meminfo record parsing works well
+    #[test]
+    fn parse_record() {
+        // Data volume record
+        let mut data_vol_record = MemInfoRecord::new(SplitSpace::new("24 kB"));
+        data_vol_record.push(SplitSpace::new("512 kB"));
+        assert_eq!(data_vol_record,
+                   MemInfoRecord::DataVolume(vec![ByteSize::kib(512)]));
+        assert_eq!(data_vol_record.len(), 1);
+
+        // Counter record
+        let mut counter_record = MemInfoRecord::new(SplitSpace::new("1337"));
+        counter_record.push(SplitSpace::new("371830"));
+        assert_eq!(counter_record, MemInfoRecord::Counter(vec![371830]));
+        assert_eq!(counter_record.len(), 1);
+
+        // Unsupported record
+        let mut bad_record = MemInfoRecord::new(SplitSpace::new("57 TiB"));
+        bad_record.push(SplitSpace::new("332 PiB"));
+        assert_eq!(bad_record, MemInfoRecord::Unsupported(1));
+        assert_eq!(bad_record.len(), 1);
+    }
+
     // TODO: Check that meminfo data initialization works well
     // TODO: Check that meminfo data parsing works well
 
-    // Check that sampler initialization works well
+    /// Check that sampler initialization works well
     #[test]
     fn init_sampler() {
         let stats =
