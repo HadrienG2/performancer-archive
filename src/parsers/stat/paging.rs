@@ -6,8 +6,8 @@ use super::StatDataStore;
 
 
 /// Storage paging ativity statistics
+/// TODO: This should be pub(super), waiting for next rustc version...
 #[derive(Debug, PartialEq)]
-// TODO: This should be pub(super), waiting for next rustc version...
 pub struct PagingStatData {
     /// Number of RAM pages that were paged in from disk
     incoming: Vec<u64>,
@@ -18,7 +18,7 @@ pub struct PagingStatData {
 //
 impl PagingStatData {
     /// Create new paging statistics
-    // TODO: This should be pub(super), waiting for next rustc version...
+    /// TODO: This should be pub(super), waiting for next rustc version...
     pub fn new() -> Self {
         Self {
             incoming: Vec::new(),
@@ -41,7 +41,7 @@ impl StatDataStore for PagingStatData {
                       "Unexpected counter in paging statistics");
     }
 
-    // Tell how many samples are present in the data store
+    /// Tell how many samples are present in the data store
     #[allow(dead_code)]
     fn len(&self) -> usize {
         let length = self.incoming.len();
@@ -56,7 +56,7 @@ impl StatDataStore for PagingStatData {
 mod tests {
     use super::{PagingStatData, SplitSpace, StatDataStore};
 
-    // Check that paging statistics initialization works as expected
+    /// Check that paging statistics initialization works as expected
     #[test]
     fn init_paging_stat() {
         let stats = PagingStatData::new();
@@ -65,7 +65,7 @@ mod tests {
         assert_eq!(stats.len(), 0);
     }
 
-    // Check that parsing paging statistics works as expected
+    /// Check that parsing paging statistics works as expected
     #[test]
     fn parse_paging_stat() {
         let mut stats = PagingStatData::new();

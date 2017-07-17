@@ -8,8 +8,8 @@ use super::StatDataStore;
 
 
 /// The amount of CPU time that the system spent in various states
+/// TODO: This should be pub(super), waiting for next rustc version...
 #[derive(Clone, Debug, PartialEq)]
-// TODO: This should be pub(super), waiting for next rustc version...
 pub struct CPUStatData {
     /// Time spent in user mode
     user_time: Vec<Duration>,
@@ -45,7 +45,7 @@ pub struct CPUStatData {
 //
 impl CPUStatData {
     /// Create new CPU statistics
-    // TODO: This should be pub(super), waiting for next rustc version...
+    /// TODO: This should be pub(super), waiting for next rustc version...
     pub fn new(num_timers: u8) -> Self {
         // Check if we know about all CPU timers
         debug_assert!(num_timers >= 4, "Some expected CPU timers are missing");
@@ -167,7 +167,7 @@ mod tests {
     use std::time::Duration;
     use super::{CPUStatData, SplitSpace, StatDataStore, TICKS_PER_SEC};
 
-    // Check that CPU statistics initialization works as expected
+    /// Check that CPU statistics initialization works as expected
     #[test]
     fn init_cpu_stat() {
         // Oldest known CPU stats format from Linux 4.11's man proc
@@ -194,7 +194,7 @@ mod tests {
         assert_eq!(latest_stats.len(), 0);
     }
 
-    // Check that parsing CPU statistics works as expected
+    /// Check that parsing CPU statistics works as expected
     #[test]
     fn parse_cpu_stat() {
         // Oldest known CPU stats format from Linux 4.11's man proc

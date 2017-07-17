@@ -54,7 +54,7 @@ impl UptimeData {
         }
     }
 
-    // Parse a sample from /proc/uptime and add it to the internal data store
+    /// Parse a sample from /proc/uptime and add it to the internal data store
     fn push(&mut self, file_contents: &str) {
         // Load machine uptime and idle time
         let mut numbers_iter = file_contents.split_whitespace();
@@ -75,7 +75,7 @@ impl UptimeData {
                       "Unsupported entry found in /proc/uptime");
     }
 
-    // Tell how many samples are present in the data store
+    /// Tell how many samples are present in the data store
     #[allow(dead_code)]
     fn len(&self) -> usize {
         let length = self.wall_clock_uptime.len();

@@ -298,8 +298,8 @@ impl StatData {
                       "Per-cpu stats do not match each_cpu.len()");
     }
 
-    // Tell how many samples are present in the data store, and in debug mode
-    // check for internal data store consistency
+    /// Tell how many samples are present in the data store, and in debug mode
+    /// check for internal data store consistency
     #[allow(dead_code)]
     fn len(&self) -> usize {
         let mut opt_len = None;
@@ -323,8 +323,8 @@ impl StatData {
         opt_len.unwrap_or(0)
     }
 
-    // INTERNAL: Helpful wrapper for pushing into optional containers that we
-    //           actually know from additional metadata to be around
+    /// INTERNAL: Helpful wrapper for pushing into optional containers that we
+    ///           actually know from additional metadata to be around
     fn force_push<T>(store: &mut Option<T>, stats: SplitSpace)
         where T: StatDataStore
     {
@@ -333,8 +333,8 @@ impl StatData {
              .push(stats);
     }
 
-    // INTERNAL: Update our prior knowledge of the amount of stored samples
-    //           (current_len) according to an optional data source.
+    /// INTERNAL: Update our prior knowledge of the amount of stored samples
+    ///           (current_len) according to an optional data source.
     fn update_len<T>(current_len: &mut Option<usize>, opt_store: &Option<T>)
         where T: StatDataStore
     {
@@ -358,12 +358,12 @@ impl StatData {
         }
     }
 }
-//
-// This enum should be kept in sync with the definition of StatData
-//
+///
+/// This enum should be kept in sync with the definition of StatData
+///
 #[derive(Debug, PartialEq)]
 enum StatDataMember {
-    // Data storage elements of StatData
+    /// Data storage elements of StatData
     AllCPUs,
     EachCPU,
     Paging,
@@ -376,7 +376,7 @@ enum StatDataMember {
     BlockedProcesses,
     SoftIRQs,
 
-    // Special entry for unsupported fields of /proc/stat
+    /// Special entry for unsupported fields of /proc/stat
     Unsupported
 }
 
@@ -417,7 +417,7 @@ mod tests {
     use super::{CPUStatData, InterruptStatData, PagingStatData, SplitSpace,
                 StatData, StatDataMember, StatDataStore, StatSampler};
 
-    // Check that scalar statistics parsing works as expected
+    /// Check that scalar statistics parsing works as expected
     #[test]
     fn parse_scalar_stat() {
         let mut scalar_stats = Vec::<u64>::new();
@@ -427,7 +427,7 @@ mod tests {
         assert_eq!(StatDataStore::len(&scalar_stats), 1);
     }
 
-    // Check that statistical data initialization works as expected
+    /// Check that statistical data initialization works as expected
     #[test]
     fn init_stat_data() {
         // Starting with an empty file (should never happen, but good base case)
@@ -537,7 +537,7 @@ mod tests {
         assert_eq!(expected.len(), 0);
     }
 
-    // Check that statistical data parsing works as expected
+    /// Check that statistical data parsing works as expected
     #[test]
     fn parse_stat_data() {
         // Starting with an empty file (should never happen, but good base case)
@@ -595,7 +595,7 @@ mod tests {
         assert_eq!(expected.len(), 1);
     }
 
-    // Check that sampler initialization works well
+    /// Check that sampler initialization works well
     #[test]
     fn init_sampler() {
         let stats =
@@ -604,7 +604,7 @@ mod tests {
         assert_eq!(stats.samples.len(), 0);
     }
 
-    // Check that basic sampling works as expected
+    /// Check that basic sampling works as expected
     #[test]
     fn basic_sampling() {
         let mut stats =

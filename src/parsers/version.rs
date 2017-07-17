@@ -10,7 +10,7 @@ use std::io::{Read, Result};
 
 
 lazy_static! {
-    /// We should only need to parse the host's kernel version once
+    /// Host version (shouldn't change, and should thus only be loaded once)
     pub static ref LINUX_VERSION: LinuxVersion =
         LinuxVersion::load()
                      .expect("Failed to load the host's kernel version");
@@ -46,7 +46,7 @@ pub struct LinuxVersion {
 }
 //
 impl LinuxVersion {
-    // Load kernel versioning information from /proc/version
+    /// Load kernel versioning information from /proc/version
     pub fn load() -> Result<Self> {
         // Read the raw kernel versioning information
         let mut file = File::open("/proc/version")?;
@@ -58,7 +58,7 @@ impl LinuxVersion {
         Ok(Self::parse(trimmed_version))
     }
 
-    // Check if we are using at least a certain kernel version (included)
+    /// Check if we are using at least a certain kernel version (included)
     pub fn greater_eq(&self, major: u8, minor: u8, bugfix: u8) -> bool {
         // Test major version
         if self.major < major { return false; }
@@ -72,12 +72,12 @@ impl LinuxVersion {
         self.bugfix >= bugfix
     }
 
-    // Check if we are below a certain kernel version (excluded)
+    /// Check if we are below a certain kernel version (excluded)
     pub fn smaller(&self, major: u8, minor: u8, bugfix: u8) -> bool {
         return !self.greater_eq(major, minor, bugfix);
     }
 
-    // INTERNAL: Parse the (trimmed) contents of /proc/version
+    /// INTERNAL: Parse the (trimmed) contents of /proc/version
     fn parse(trimmed_version: &str) -> Self {
         // Make sure that we are running on Linux
         assert_eq!(&trimmed_version[0..5], "Linux",

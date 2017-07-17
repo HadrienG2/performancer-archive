@@ -6,8 +6,8 @@ use super::StatDataStore;
 
 
 /// Interrupt statistics from /proc/stat, in structure-of-array layout
-#[derive(Debug, PartialEq)]
 // TODO: This should be pub(super), waiting for next rustc version...
+#[derive(Debug, PartialEq)]
 pub struct InterruptStatData {
     /// Total number of interrupts that were serviced. May be higher than the
     /// sum of the breakdown below if there are unnumbered interrupt sources.
@@ -19,7 +19,7 @@ pub struct InterruptStatData {
 //
 impl InterruptStatData {
     /// Create new interrupt statistics, given the amount of interrupt sources
-    // TODO: This should be pub(super), waiting for next rustc version...
+    /// TODO: This should be pub(super), waiting for next rustc version...
     pub fn new(num_irqs: u16) -> Self {
         Self {
             total: Vec::new(),
@@ -116,7 +116,7 @@ impl InterruptCounts {
 mod tests {
     use super::{InterruptCounts, InterruptStatData, SplitSpace, StatDataStore};
 
-    // Check that initializing an interrupt count sampler works as expected
+    /// Check that initializing an interrupt count sampler works as expected
     #[test]
     fn init_interrupt_counts() {
         let counts = InterruptCounts::new();
@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(counts.len(), 0);
     }
 
-    // Check that interrupt count sampling works as expected
+    /// Check that interrupt count sampling works as expected
     #[test]
     fn parse_interrupt_counts() {
         // Adding one zero should keep us in the base "zeroes" state
@@ -150,7 +150,7 @@ mod tests {
         assert_eq!(counts2.len(), 1);
     }
 
-    // Check that interrupt statistics initialization works as expected
+    /// Check that interrupt statistics initialization works as expected
     #[test]
     fn init_interrupt_stat() {
         // Check that interrupt statistics without any details work
@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(many_stats.len(), 0);
     }
 
-    // Check that parsing interrupt statistics works as expected
+    /// Check that parsing interrupt statistics works as expected
     #[test]
     fn parse_interrupt_stat() {
         // Interrupt statistics without any detail
