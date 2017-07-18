@@ -288,7 +288,17 @@ mod tests {
         assert_eq!(stats.samples.len(), 0);
     }
 
-    // TODO: Check that basic sampling works as expected
+    /// Check that basic sampling works as expected
+    #[test]
+    fn basic_sampling() {
+        let mut stats =
+            MemInfoSampler::new()
+                           .expect("Failed to create a /proc/meminfo sampler");
+        stats.sample().expect("Failed to sample meminfo once");
+        assert_eq!(stats.samples.len(), 1);
+        stats.sample().expect("Failed to sample meminfo twice");
+        assert_eq!(stats.samples.len(), 2);
+    }
 }
 
 
