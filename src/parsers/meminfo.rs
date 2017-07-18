@@ -17,7 +17,7 @@ pub struct MemInfoSampler {
 }
 //
 impl MemInfoSampler {
-    /// Create a new sampler of /proc/stat
+    /// Create a new sampler of /proc/meminfo
     pub fn new() -> Result<Self> {
         let mut reader = ProcFileReader::open("/proc/meminfo")?;
         let mut first_readout = String::new();
@@ -30,11 +30,11 @@ impl MemInfoSampler {
         )
     }
 
-    /* /// TODO: Acquire a new sample of statistical data
+    /// Acquire a new sample of memory information data
     pub fn sample(&mut self) -> Result<()> {
         let samples = &mut self.samples;
         self.reader.sample(|file_contents: &str| samples.push(file_contents))
-    } */
+    }
 
     // TODO: Add accessors to the inner stat data + associated tests
 }
@@ -107,7 +107,21 @@ impl MemInfoData {
         data
     }
 
-    // TODO: Add a way to push data in
+    /// Parse the contents of /proc/meminfo and add a data sample to all
+    /// corresponding entries in the internal data store
+    fn push(&mut self, file_contents: &str) {
+        // This time, we know how lines of /proc/meminfo map to our members
+        for (line, record) in file_contents.lines()
+                                           .zip(self.records.iter_mut()) {
+            // The beginning of parsing is the same as before: split by spaces.
+            // But this time, we discard the header, as we already know it.
+            let mut record_data = SplitSpace::new(line);
+            record_data.next();
+
+            // Forward the data to the appropriate parser
+            record.push(record_data);
+        }
+    }
 
     /// Tell how many samples are present in the data store, and in debug mode
     /// check for internal data store consistency
@@ -285,6 +299,7 @@ mod tests {
 #[cfg(test)]
 mod benchmarks {
     use ::ProcFileReader;
+    use super::MemInfoSampler;
     use testbench;
 
     /// Benchmark for the raw meminfo readout overhead
@@ -299,5 +314,15 @@ mod benchmarks {
         });
     }
 
-    // TODO: Benchmark for the full meminfo sampling overhead
+    /// Benchmark for the full meminfo sampling overhead
+    #[test]
+    #[ignore]
+    fn sampling_overhead() {
+        let mut stat =
+            MemInfoSampler::new()
+                           .expect("Failed to create a /proc/meminfo sampler");
+        testbench::benchmark(400_000, || {
+            stat.sample().expect("Failed to sample /proc/meminfo");
+        });
+    }
 }
