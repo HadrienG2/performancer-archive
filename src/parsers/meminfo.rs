@@ -232,7 +232,8 @@ impl MemInfoRecord {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::{ByteSize, MemInfoRecord, MemInfoSampler, SplitSpace};
+    use super::{ByteSize, MemInfoData, MemInfoRecord, MemInfoSampler,
+                SplitSpace};
 
     /// Check that meminfo record initialization works well
     #[test]
@@ -276,8 +277,63 @@ mod tests {
         assert_eq!(bad_record.len(), 1);
     }
 
-    // TODO: Check that meminfo data initialization works well
-    // TODO: Check that meminfo data parsing works well
+    /// Check that meminfo data initialization works as expected
+    #[test]
+    fn init_meminfo_data() {
+        // Starting with an empty file (should never happen, but good base case)
+        let mut info = String::new();
+        let empty_info = MemInfoData::new(&info);
+        assert_eq!(empty_info.records.len(), 0);
+        assert_eq!(empty_info.index.len(), 0);
+        assert_eq!(empty_info.len(), 0);
+        let mut expected = empty_info;
+
+        // ...adding a first line of memory info...
+        info.push_str("MyDataVolume:   1234 kB");
+        let single_info = MemInfoData::new(&info);
+        expected.records.push(MemInfoRecord::DataVolume(Vec::new()));
+        expected.index.insert("MyDataVolume".to_owned(), 0);
+        assert_eq!(single_info, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...and a second line of memory info.
+        info.push_str("\nMyCounter:   42");
+        let double_info = MemInfoData::new(&info);
+        expected.records.push(MemInfoRecord::Counter(Vec::new()));
+        expected.index.insert("MyCounter".to_owned(), 1);
+        assert_eq!(double_info, expected);
+        assert_eq!(expected.len(), 0);
+    }
+
+    /// Check that meminfo data parsing works well
+    #[test]
+    fn parse_meminfo_data() {
+        // Starting with an empty file (should never happen, but good base case)
+        let mut info = String::new();
+        let mut empty_info = MemInfoData::new(&info);
+        empty_info.push(&info);
+        let mut expected = MemInfoData::new(&info);
+        assert_eq!(empty_info, expected);
+
+        // ...adding a first line of memory info...
+        info.push_str("MyDataVolume:   1234 kB");
+        let mut single_info = MemInfoData::new(&info);
+        single_info.push(&info);
+        expected = MemInfoData::new(&info);
+        expected.records[0].push(SplitSpace::new("1234 kB"));
+        assert_eq!(single_info, expected);
+        assert_eq!(expected.len(), 1);
+
+        // ...and a second line of memory info.
+        info.push_str("\nMyCounter:   42");
+        let mut double_info = MemInfoData::new(&info);
+        double_info.push(&info);
+        expected = MemInfoData::new(&info);
+        expected.records[0].push(SplitSpace::new("1234 kB"));
+        expected.records[1].push(SplitSpace::new("42"));
+        assert_eq!(double_info, expected);
+        assert_eq!(expected.len(), 1);
+    }
 
     /// Check that sampler initialization works well
     #[test]
