@@ -125,7 +125,7 @@ impl StatDataStore for CPUStatData {
                       "A CPU timer appeared out of nowhere");
     }
 
-    // Tell how many samples are present in the data store
+    /// Tell how many samples are present in the data store
     #[allow(dead_code)]
     fn len(&self) -> usize {
         // Check the mandatory CPU timers

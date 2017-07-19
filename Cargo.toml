@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Hadrien G. <knights_of_ni@gmx.com>"]
 
 [dependencies]
+bytesize = "^0.1"
 chrono = "^0.4"
 lazy_static = "^0.2"
 libc = "^0.2"
