@@ -2,7 +2,7 @@
 
 use ::ProcFileReader;
 use bytesize::ByteSize;
-use parsers::SplitSpace;
+use parsers::{UnixLines, SplitSpace};
 use std::collections::HashMap;
 use std::io::Result;
 
@@ -72,7 +72,7 @@ impl MemInfoData {
         };
 
         // For each line of the initial content of /proc/meminfo...
-        for line in initial_contents.lines() {
+        for line in UnixLines::new(initial_contents) {
             // ...decompose according to whitespace...
             let mut whitespace_iter = SplitSpace::new(line);
 
@@ -111,8 +111,8 @@ impl MemInfoData {
     /// corresponding entries in the internal data store
     fn push(&mut self, file_contents: &str) {
         // This time, we know how lines of /proc/meminfo map to our members
-        for (line, record) in file_contents.lines()
-                                           .zip(self.records.iter_mut()) {
+        for (line, record) in UnixLines::new(file_contents)
+                                        .zip(self.records.iter_mut()) {
             // The beginning of parsing is the same as before: split by spaces.
             // But this time, we discard the header, as we already know it.
             let mut record_data = SplitSpace::new(line);
