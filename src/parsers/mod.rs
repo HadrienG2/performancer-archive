@@ -63,6 +63,70 @@ fn parse_duration_secs(input: &str) -> Duration {
 }
 
 
+/// Fast Lines specialization for Unix line separators (\n)
+///
+/// The meminfo parser seems to be bottlenecked by the underlying line iterator.
+/// I'm not sure whether there is as much to gain here as with SplitWhitespace,
+/// but I guess it's worth trying anyhow.
+///
+struct UnixLines<'a> {
+    /// String which we are trying to split
+    target: &'a str,
+
+    /// Iterator over the characters and their byte indices
+    char_iter: CharIndices<'a>,
+
+    /// Byte index which represents the start of the next line (if any)
+    first_idx: usize,
+}
+//
+impl<'a> UnixLines<'a> {
+    /// Create a line-splitting iterator
+    fn new(target: &'a str) -> Self {
+        Self {
+            target,
+            char_iter: target.char_indices(),
+            first_idx: 0,
+        }
+    }
+}
+//
+impl<'a> Iterator for UnixLines<'a> {
+    /// We're outputting strings
+    type Item = &'a str;
+
+    /// This is how one iterates through the Unix lines
+    fn next(&mut self) -> Option<&'a str> {
+        // Last index where we observed a character (initially invalid)
+        let mut last_idx = usize::max_value();
+
+        // As long as we see new characters in the string...
+        while let Some((idx, ch)) = self.char_iter.next() {
+            // ...we can update the aforementioned index (should have zero cost,
+            // as the Rust compiler should optimize it as a renaming)
+            last_idx = idx;
+
+            // ...and look for line feeds, which end the active line
+            if ch == '\n' {
+                let result = &self.target[self.first_idx..last_idx];
+                self.first_idx = last_idx + ch.len_utf8();
+                return Some(result);
+            }
+        }
+
+        // The reason why we need to do the above gymnastics with indices is
+        // that the definition of Lines allows the last line to be terminated
+        // by either a trailing newline (without any character after it) or by
+        // the end of the string, and we need to disambiguate.
+        if last_idx == usize::max_value() {
+            return None;
+        } else {
+            return Some(&self.target[self.first_idx..]);
+        }
+    }
+}
+
+
 /// Fast SplitWhitespace specialization for space-separated strings
 ///
 /// The SplitWhitespace iterator from the Rust standard library is great for
@@ -136,7 +200,7 @@ impl<'a> Iterator for SplitSpace<'a> {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::SplitSpace;
+    use super::{UnixLines, SplitSpace};
     use std::time::Duration;
 
     /// Check that our Duration parser works as expected
@@ -161,6 +225,41 @@ mod tests {
         // Sub-nanosecond precision is truncated
         assert_eq!(super::parse_duration_secs("7.8901234567"),
                    Duration::new(7, 890_123_456));
+    }
+
+    // Check that UnixLines works as intended
+    #[test]
+    fn unix_lines() {
+        // An empty string
+        let mut lines_empty = UnixLines::new("");
+        assert_eq!(lines_empty.next(), None);
+
+        // Some text without a trailing newline
+        let mut lines_text = UnixLines::new("abc123");
+        assert_eq!(lines_text.next(), Some("abc123"));
+        assert_eq!(lines_text.next(), None);
+
+        // A lone newline
+        let mut lines_newline = UnixLines::new("\n");
+        assert_eq!(lines_newline.next(), Some(""));
+        assert_eq!(lines_newline.next(), None);
+
+        // Some text with a trailing newline
+        let mut lines_trailing = UnixLines::new("azertyuiop\n");
+        assert_eq!(lines_trailing.next(), Some("azertyuiop"));
+        assert_eq!(lines_trailing.next(), None);
+
+        // Two lines of text without a trailing newline
+        let mut lines_double = UnixLines::new("aonghosi\nsongroq");
+        assert_eq!(lines_double.next(), Some("aonghosi"));
+        assert_eq!(lines_double.next(), Some("songroq"));
+        assert_eq!(lines_double.next(), None);
+
+        // Two lines of text with a trailing newline
+        let mut lines_double_trailing = UnixLines::new("seinjha\nhzq4w1\n");
+        assert_eq!(lines_double_trailing.next(), Some("seinjha"));
+        assert_eq!(lines_double_trailing.next(), Some("hzq4w1"));
+        assert_eq!(lines_double_trailing.next(), None);
     }
 
     // Check that SplitSpace works as intended
