@@ -198,7 +198,7 @@ impl<'a> Iterator for SplitSpace<'a> {
 }
 
 
-// An iterator over **both** lines of text and space-separated words
+// An "iterator" operating over **both** lines of text and space-separated words
 //
 // Files in procfs often attribute different semantics to spaces and line feeds.
 // Line feeds are used to separate high-level metadata (e.g. CPU vs RAM) whereas
@@ -209,9 +209,9 @@ impl<'a> Iterator for SplitSpace<'a> {
 // hierarchical levels: at the level of lines of text, and at the level of
 // space-separated "words" within a line of text.
 //
-// This can be done by combining Lines (or UnixLines) and SplitWhitespace (or
-// SplitSpace), however each line of text must then be parsed twice: first by
-// Lines in order to extract a line of text, and again by SplitWhitespace in
+// This can be done by combining Lines and SplitWhitespace (or optimized
+// versions thereof), however each line of text must then be parsed twice: first
+// by Lines in order to extract a line of text, and again by SplitWhitespace in
 // order to separate the words inside of the line of text.
 //
 // In principle, however, both of those separations could be carried out in a
@@ -220,13 +220,14 @@ impl<'a> Iterator for SplitSpace<'a> {
 //
 // The Rust Iterator API does not offer any guarantee about whether calling
 // next() on an iterator which returned None continues to return None. This
-// iterator exploits that undefined behaviour by defining a version of
-// SplitSpaces which outputs None whenever a newline character is reached,
+// iterator exploits that undefined behaviour by defining a variant of
+// SplitWhitespace which outputs None whenever a newline character is reached,
 // effectively implementing some (admittedly crude) line splitting without
 // needing to parse each line of the input twice.
 //
-// A boolean flag is provided to disambiguate whether a None indicates the end
-// of a line of text or the end of the input string.
+// Expected usage is to call next_line() on every line, continue iterating over
+// lines as long as this function returns true, and for each line use
+// SplitLinesBySpace as a regular iterator over space-separated words.
 //
 pub struct SplitLinesBySpace<'a> {
     /// String which we are trying to split
@@ -267,8 +268,8 @@ impl<'a> SplitLinesBySpace<'a> {
                 return true;
             },
 
-            // We are in the middle of a line of text. Iterate until we reach
-            // either the end of that line, or that of the input.
+            // We are in the middle of a line of text. Skip it by iterating
+            // until we reach either the end of that line, or that of the input.
             LineSpaceSplitterStatus::InsideLine => loop {
                 match self.char_iter.next() {
                     // A newline was encountered. Check if there is text after
@@ -305,6 +306,9 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
 
     /// This is how one iterates through space-separated words until a newline
     fn next(&mut self) -> Option<Self::Item> {
+        // We expect the caller to have properly called next_line() beforehand
+        assert_eq!(self.status, LineSpaceSplitterStatus::InsideLine);
+
         // Find the first non-space character before the end of line (if any)
         let first_idx;
         loop {
@@ -353,6 +357,7 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
     }
 }
 //
+#[derive(Debug, PartialEq)]
 enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
 
 
