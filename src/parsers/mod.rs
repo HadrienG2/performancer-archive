@@ -228,30 +228,74 @@ impl<'a> Iterator for SplitSpace<'a> {
 // A boolean flag is provided to disambiguate whether a None indicates the end
 // of a line of text or the end of the input string.
 //
-struct SplitLinesBySpace<'a> {
+pub struct SplitLinesBySpace<'a> {
     /// String which we are trying to split
     target: &'a str,
 
     /// Iterator over the characters and their byte indices
     char_iter: Peekable<CharIndices<'a>>,
 
-    /// Whether the end of the input string has been reached
-    end_of_input_reached: bool,
+    /// Where we are within the input (at the beginning of a line, somewhere
+    /// inside a line, or at the end of the input string)
+    status: LineSpaceSplitterStatus,
 }
 //
 impl<'a> SplitLinesBySpace<'a> {
     /// Create a line- and space-splitting iterator
-    fn new(target: &'a str) -> Self {
+    pub fn new(target: &'a str) -> Self {
+        let mut char_iter = target.char_indices().peekable();
+        let input_empty = char_iter.peek().is_none();
         Self {
             target,
-            char_iter: target.char_indices().peekable(),
-            end_of_input_reached: false,
+            char_iter,
+            status: if input_empty {
+                        LineSpaceSplitterStatus::AtInputEnd
+                    } else {
+                        LineSpaceSplitterStatus::AtLineStart
+                    },
         }
     }
 
-    /// After None was yieleded, this tells whether the end of input was reached
-    fn end_reached(&self) -> bool {
-        self.end_of_input_reached
+    /// Try to go to the beginning of the next line. Return true if successful,
+    /// false if we reached the end of the file and there is no next line.
+    pub fn next_line(&mut self) -> bool {
+        match self.status {
+            // We are at the beginning of a line of text. Tell the client that
+            // it can parse it, and be ready to skip it on the next call.
+            LineSpaceSplitterStatus::AtLineStart => {
+                self.status = LineSpaceSplitterStatus::InsideLine;
+                return true;
+            },
+
+            // We are in the middle of a line of text. Iterate until we reach
+            // either the end of that line, or that of the input.
+            LineSpaceSplitterStatus::InsideLine => loop {
+                match self.char_iter.next() {
+                    // A newline was encountered. Check if there is text after
+                    // it or it's just trailing at the end of the input.
+                    Some((_, '\n')) => {
+                        if self.char_iter.peek().is_some() {
+                            return true;
+                        } else {
+                            self.status = LineSpaceSplitterStatus::AtInputEnd;
+                            return false;
+                        }
+                    }
+
+                    // Another character was encountered. Continue iteration.
+                    Some((_, _)) => continue,
+
+                    // We reached the end of the input, and will stop there.
+                    None => {
+                        self.status = LineSpaceSplitterStatus::AtInputEnd;
+                        return false;
+                    },
+                }
+            },
+
+            // There is no next line, we are at the end of the input string
+            LineSpaceSplitterStatus::AtInputEnd => return false,
+        }
     }
 }
 //
@@ -266,14 +310,18 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
         loop {
             match self.char_iter.next() {
                 // Ignore spaces
-                Some((_, ' ')) => continue,
+                Some((_, ' ')) => {
+                    continue;
+                },
 
-                // Terminate the line when a newline is reached, and treat
-                // trailing newlines at the end of the string like Lines does
+                // Output a None when a newline is reached, notify the line
+                // iterator, and tell it whether more input will be coming.
                 Some((_, '\n')) => {
-                    if self.char_iter.peek().is_none() {
-                        self.end_of_input_reached = true;
-                    }
+                    self.status = if self.char_iter.peek().is_some() {
+                                      LineSpaceSplitterStatus::AtInputEnd
+                                  } else {
+                                      LineSpaceSplitterStatus::AtLineStart 
+                                  };
                     return None;
                 },
 
@@ -285,15 +333,14 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
 
                 // Terminate when the end of the text is reached
                 None => {
-                    self.end_of_input_reached = true;
+                    self.status = LineSpaceSplitterStatus::AtInputEnd;
                     return None;
                 },
             }
         }
 
         // Look for a space or newline as a word terminator. Do not swallow
-        // newlines or None, as they mean we must produce None on the next
-        // iteration.
+        // newlines or None, as we must produce None on the next iteration.
         while let Some(&(idx, ch)) = self.char_iter.peek() {
             if (ch == ' ') || (ch == '\n') {
                 return Some(&self.target[first_idx..idx]);
@@ -306,6 +353,8 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
         return Some(&self.target[first_idx..]);
     }
 }
+//
+enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
 
 
 /// Unit tests
@@ -417,68 +466,69 @@ mod tests {
     fn split_lines_by_space() {
         // Split the empty string
         let mut split_empty = SplitLinesBySpace::new("");
-        assert!(!split_empty.end_reached());
-        assert_eq!(split_empty.next(), None);
-        assert!(split_empty.end_reached());
+        assert_eq!(split_empty.next_line(), false);
 
         // Split a string full of space
         let mut split_space = SplitLinesBySpace::new(" ");
-        assert!(!split_space.end_reached());
+        assert_eq!(split_space.next_line(), true);
         assert_eq!(split_space.next(), None);
-        assert!(split_space.end_reached());
+        assert_eq!(split_space.next_line(), false);
 
         // Split a newline
         let mut split_newline = SplitLinesBySpace::new("\n");
-        assert!(!split_newline.end_reached());
+        assert_eq!(split_newline.next_line(), true);
         assert_eq!(split_newline.next(), None);
-        assert!(split_newline.end_reached());
+        assert_eq!(split_newline.next_line(), false);
 
         // Split a single word
         let mut split_word = SplitLinesBySpace::new("42");
-        assert!(!split_word.end_reached());
+        assert_eq!(split_word.next_line(), true);
         assert_eq!(split_word.next(), Some("42"));
         assert_eq!(split_word.next(), None);
-        assert!(split_word.end_reached());
+        assert_eq!(split_word.next_line(), false);
 
         // Split a word preceded by spaces
         let mut split_space_word = SplitLinesBySpace::new("  24");
-        assert!(!split_space_word.end_reached());
+        assert_eq!(split_space_word.next_line(), true);
         assert_eq!(split_space_word.next(), Some("24"));
         assert_eq!(split_space_word.next(), None);
-        assert!(split_space_word.end_reached());
+        assert_eq!(split_space_word.next_line(), false);
 
         // Split a word preceded by a newline
         let mut split_newline_word = SplitLinesBySpace::new("\nabc123");
-        assert!(!split_newline_word.end_reached());
+        assert_eq!(split_newline_word.next_line(), true);
         assert_eq!(split_newline_word.next(), None);
-        assert!(!split_newline_word.end_reached());
+        assert_eq!(split_newline_word.next_line(), true);
         assert_eq!(split_newline_word.next(), Some("abc123"));
         assert_eq!(split_newline_word.next(), None);
-        assert!(split_newline_word.end_reached());
+        assert_eq!(split_newline_word.next_line(), false);
 
         // Split a word followed by spaces
         let mut split_word_space = SplitLinesBySpace::new("viwb ");
-        assert!(!split_word_space.end_reached());
+        assert_eq!(split_word_space.next_line(), true);
         assert_eq!(split_word_space.next(), Some("viwb"));
         assert_eq!(split_word_space.next(), None);
-        assert!(split_word_space.end_reached());
+        assert_eq!(split_word_space.next_line(), false);
 
         // Split a word followed by a newline
         let mut split_word_newline = SplitLinesBySpace::new("g1s13\n");
-        assert!(!split_word_newline.end_reached());
+        assert_eq!(split_word_newline.next_line(), true);
         assert_eq!(split_word_newline.next(), Some("g1s13"));
         assert_eq!(split_word_newline.next(), None);
-        assert!(split_word_newline.end_reached());
+        assert_eq!(split_word_newline.next_line(), false);
 
         // Split three words with spaces and newlines
         let mut split_everything = SplitLinesBySpace::new("  s( é \n o,p");
-        assert!(!split_everything.end_reached());
+        assert_eq!(split_everything.next_line(), true);
         assert_eq!(split_everything.next(), Some("s("));
         assert_eq!(split_everything.next(), Some("é"));
         assert_eq!(split_everything.next(), None);
-        assert!(!split_everything.end_reached());
+        assert_eq!(split_everything.next_line(), true);
         assert_eq!(split_everything.next(), Some("o,p"));
         assert_eq!(split_everything.next(), None);
-        assert!(split_everything.end_reached());
+        assert_eq!(split_everything.next_line(), false);
+
+        // TODO: Also check that everything goes well when the client calls
+        //       next_line less carefully.
     }
 }
