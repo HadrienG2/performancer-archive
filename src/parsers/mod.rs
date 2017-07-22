@@ -282,7 +282,7 @@ impl<'a> SplitLinesBySpace<'a> {
                         }
                     }
 
-                    // Another character was encountered. Continue iteration.
+                    // Some other character was encountered. Continue iteration.
                     Some((_, _)) => continue,
 
                     // We reached the end of the input, and will stop there.
@@ -309,18 +309,17 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
         let first_idx;
         loop {
             match self.char_iter.next() {
-                // Ignore spaces
-                Some((_, ' ')) => {
-                    continue;
-                },
+                // Discard all the spaces along the way.
+                Some((_, ' ')) => continue,
 
-                // Output a None when a newline is reached, notify the line
-                // iterator, and tell it whether more input will be coming.
+                // Output a None when a newline is reached, to signal the client
+                // of space-separated data that it's time to yield control back
+                // to the line iterator (which we configure along the way).
                 Some((_, '\n')) => {
                     self.status = if self.char_iter.peek().is_some() {
-                                      LineSpaceSplitterStatus::AtInputEnd
+                                      LineSpaceSplitterStatus::AtLineStart
                                   } else {
-                                      LineSpaceSplitterStatus::AtLineStart 
+                                      LineSpaceSplitterStatus::AtInputEnd
                                   };
                     return None;
                 },
