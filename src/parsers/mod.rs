@@ -465,7 +465,8 @@ mod tests {
         assert_eq!(split_trailing_pair.next(), None);
     }
 
-    /// Check that SplitLinesBySpace works as intended
+    /// Check that SplitLinesBySpace works as intended, both when skipping
+    /// through lines and when exhaustively iterating through their words.
     #[test]
     fn split_lines_by_space() {
         // Split the empty string
@@ -475,17 +476,26 @@ mod tests {
         // Split a string full of space
         let mut split_space = SplitLinesBySpace::new(" ");
         assert_eq!(split_space.next_line(), true);
+        assert_eq!(split_space.next_line(), false);
+        split_space = SplitLinesBySpace::new(" ");
+        assert_eq!(split_space.next_line(), true);
         assert_eq!(split_space.next(), None);
         assert_eq!(split_space.next_line(), false);
 
         // Split a newline
         let mut split_newline = SplitLinesBySpace::new("\n");
         assert_eq!(split_newline.next_line(), true);
+        assert_eq!(split_newline.next_line(), false);
+        split_newline = SplitLinesBySpace::new("\n");
+        assert_eq!(split_newline.next_line(), true);
         assert_eq!(split_newline.next(), None);
         assert_eq!(split_newline.next_line(), false);
 
         // Split a single word
         let mut split_word = SplitLinesBySpace::new("42");
+        assert_eq!(split_word.next_line(), true);
+        assert_eq!(split_word.next_line(), false);
+        split_word = SplitLinesBySpace::new("42");
         assert_eq!(split_word.next_line(), true);
         assert_eq!(split_word.next(), Some("42"));
         assert_eq!(split_word.next(), None);
@@ -494,12 +504,19 @@ mod tests {
         // Split a word preceded by spaces
         let mut split_space_word = SplitLinesBySpace::new("  24");
         assert_eq!(split_space_word.next_line(), true);
+        assert_eq!(split_space_word.next_line(), false);
+        split_space_word = SplitLinesBySpace::new("  24");
+        assert_eq!(split_space_word.next_line(), true);
         assert_eq!(split_space_word.next(), Some("24"));
         assert_eq!(split_space_word.next(), None);
         assert_eq!(split_space_word.next_line(), false);
 
         // Split a word preceded by a newline
         let mut split_newline_word = SplitLinesBySpace::new("\nabc123");
+        assert_eq!(split_newline_word.next_line(), true);
+        assert_eq!(split_newline_word.next_line(), true);
+        assert_eq!(split_newline_word.next_line(), false);
+        split_newline_word = SplitLinesBySpace::new("\nabc123");
         assert_eq!(split_newline_word.next_line(), true);
         assert_eq!(split_newline_word.next(), None);
         assert_eq!(split_newline_word.next_line(), true);
@@ -510,12 +527,18 @@ mod tests {
         // Split a word followed by spaces
         let mut split_word_space = SplitLinesBySpace::new("viwb ");
         assert_eq!(split_word_space.next_line(), true);
+        assert_eq!(split_word_space.next_line(), false);
+        split_word_space = SplitLinesBySpace::new("viwb ");
+        assert_eq!(split_word_space.next_line(), true);
         assert_eq!(split_word_space.next(), Some("viwb"));
         assert_eq!(split_word_space.next(), None);
         assert_eq!(split_word_space.next_line(), false);
 
         // Split a word followed by a newline
         let mut split_word_newline = SplitLinesBySpace::new("g1s13\n");
+        assert_eq!(split_word_newline.next_line(), true);
+        assert_eq!(split_word_newline.next_line(), false);
+        split_word_newline = SplitLinesBySpace::new("g1s13\n");
         assert_eq!(split_word_newline.next_line(), true);
         assert_eq!(split_word_newline.next(), Some("g1s13"));
         assert_eq!(split_word_newline.next(), None);
@@ -524,6 +547,10 @@ mod tests {
         // Split three words with spaces and newlines
         let mut split_everything = SplitLinesBySpace::new("  s( é \n o,p");
         assert_eq!(split_everything.next_line(), true);
+        assert_eq!(split_everything.next_line(), true);
+        assert_eq!(split_everything.next_line(), false);
+        split_everything = SplitLinesBySpace::new("  s( é \n o,p");
+        assert_eq!(split_everything.next_line(), true);
         assert_eq!(split_everything.next(), Some("s("));
         assert_eq!(split_everything.next(), Some("é"));
         assert_eq!(split_everything.next(), None);
@@ -531,8 +558,5 @@ mod tests {
         assert_eq!(split_everything.next(), Some("o,p"));
         assert_eq!(split_everything.next(), None);
         assert_eq!(split_everything.next_line(), false);
-
-        // TODO: Also check that everything goes well when the client calls
-        //       next_line less carefully.
     }
 }
