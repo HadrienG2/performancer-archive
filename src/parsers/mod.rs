@@ -19,7 +19,7 @@ pub mod stat;
 pub mod uptime;
 pub mod version;
 
-use std::iter::Peekable;
+use itertools::{self, PutBack};
 use std::str::CharIndices;
 use std::time::Duration;
 
@@ -234,7 +234,7 @@ pub struct SplitLinesBySpace<'a> {
     target: &'a str,
 
     /// Iterator over the characters and their byte indices
-    char_iter: Peekable<CharIndices<'a>>,
+    char_iter: PutBack<CharIndices<'a>>,
 
     /// Where we are within the input (at the beginning of a line, somewhere
     /// inside a line, or at the end of the input string)
@@ -244,8 +244,8 @@ pub struct SplitLinesBySpace<'a> {
 impl<'a> SplitLinesBySpace<'a> {
     /// Create a line- and space-splitting iterator
     pub fn new(target: &'a str) -> Self {
-        let mut char_iter = target.char_indices().peekable();
-        let input_empty = char_iter.peek().is_none();
+        let mut char_iter = itertools::put_back(target.char_indices());
+        let input_empty = Self::at_end(&mut char_iter);
         Self {
             target,
             char_iter,
@@ -275,11 +275,11 @@ impl<'a> SplitLinesBySpace<'a> {
                     // A newline was encountered. Check if there is text after
                     // it or it's just trailing at the end of the input.
                     Some((_, '\n')) => {
-                        if self.char_iter.peek().is_some() {
-                            return true;
-                        } else {
+                        if Self::at_end(&mut self.char_iter) {
                             self.status = LineSpaceSplitterStatus::AtInputEnd;
                             return false;
+                        } else {
+                            return true;
                         }
                     }
 
@@ -296,6 +296,16 @@ impl<'a> SplitLinesBySpace<'a> {
 
             // There is no next line, we are at the end of the input string
             LineSpaceSplitterStatus::AtInputEnd => return false,
+        }
+    }
+
+    /// INTERNAL: Is there still a character left in the internal iterator?
+    fn at_end(iter: &mut PutBack<CharIndices<'a>>) -> bool {
+        if let Some(item) = iter.next() {
+            iter.put_back(item);
+            false
+        } else {
+            true
         }
     }
 }
@@ -321,10 +331,10 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
                 // of space-separated data that it's time to yield control back
                 // to the line iterator (which we configure along the way).
                 Some((_, '\n')) => {
-                    self.status = if self.char_iter.peek().is_some() {
-                                      LineSpaceSplitterStatus::AtLineStart
-                                  } else {
+                    self.status = if Self::at_end(&mut self.char_iter) {
                                       LineSpaceSplitterStatus::AtInputEnd
+                                  } else {
+                                      LineSpaceSplitterStatus::AtLineStart
                                   };
                     return None;
                 },
@@ -348,14 +358,20 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
         // current line, we will need to output two things in a row, first the
         // word, then a None. We handle that by peeking instead of iterating.
         loop {
-            match self.char_iter.peek() {
+            match self.char_iter.next() {
                 // We reached the end of a word: output said word.
-                Some(&(idx, ' ')) | Some(&(idx, '\n')) => {
-                    return Some(&self.target[first_idx..idx]);
+                Some((last_idx, ' ')) => {
+                    return Some(&self.target[first_idx..last_idx]);
                 },
 
-                // We are still in the middle of the word: consume the character
-                Some(_) => { self.char_iter.next(); },
+                // Newlines also terminate words, but we must put them back in
+                Some((last_idx, '\n')) => {
+                    self.char_iter.put_back((last_idx, '\n'));
+                    return Some(&self.target[first_idx..last_idx]);
+                }
+
+                // We are still in the middle of the word: move on
+                Some(_) => continue,
 
                 // We reached the end of the string: output the last word
                 None => return Some(&self.target[first_idx..]),
