@@ -2,7 +2,7 @@
 
 use ::ProcFileReader;
 use bytesize::ByteSize;
-use parsers::{UnixLines, SplitSpace};
+use parsers::SplitLinesBySpace;
 use std::collections::HashMap;
 use std::io::Result;
 
@@ -72,21 +72,19 @@ impl MemInfoData {
         };
 
         // For each line of the initial content of /proc/meminfo...
-        for line in UnixLines::new(initial_contents) {
-            // ...decompose according to whitespace...
-            let mut whitespace_iter = SplitSpace::new(line);
-
+        let mut splitter = SplitLinesBySpace::new(initial_contents);
+        while splitter.next_line() {
             // ...and check that the header has the expected format. It should
             // consist of a non-empty string key, followed by a colon, which we
             // shall get rid of along the way.
-            let mut header = whitespace_iter.next()
-                                            .expect("Unexpected empty line")
-                                            .to_owned();
+            let mut header = splitter.next()
+                                     .expect("Unexpected empty line")
+                                     .to_owned();
             assert_eq!(header.pop(), Some(':'),
                        "meminfo headers should end with a colon");
 
             // Build a record for this line of /proc/meminfo
-            let record = MemInfoRecord::new(whitespace_iter);
+            let record = MemInfoRecord::new(&mut splitter);
 
             // Report unsupported records in debug mode
             debug_assert!(record != MemInfoRecord::Unsupported(0),
@@ -111,15 +109,15 @@ impl MemInfoData {
     /// corresponding entries in the internal data store
     fn push(&mut self, file_contents: &str) {
         // This time, we know how lines of /proc/meminfo map to our members
-        for (line, record) in UnixLines::new(file_contents)
-                                        .zip(self.records.iter_mut()) {
+        let mut splitter = SplitLinesBySpace::new(file_contents);
+        for record in self.records.iter_mut() {
             // The beginning of parsing is the same as before: split by spaces.
             // But this time, we discard the header, as we already know it.
-            let mut record_data = SplitSpace::new(line);
-            record_data.next();
+            assert!(splitter.next_line(), "A meminfo record has disappeared");
+            splitter.next();
 
             // Forward the data to the appropriate parser
-            record.push(record_data);
+            record.push(&mut splitter);
         }
     }
 
@@ -158,7 +156,7 @@ enum MemInfoRecord {
 //
 impl MemInfoRecord {
     /// Create a new record, choosing the type based on some raw data
-    fn new(mut raw_data: SplitSpace) -> Self {
+    fn new(raw_data: &mut SplitLinesBySpace) -> Self {
         // The raw data should start with a numerical field. Make sure that we
         // can parse it. Otherwise, we don't support the associated content.
         let number_parse_result = raw_data.next()
@@ -183,7 +181,7 @@ impl MemInfoRecord {
     }
 
     /// Push new data inside of the record
-    fn push(&mut self, mut raw_data: SplitSpace) {
+    fn push(&mut self, raw_data: &mut SplitLinesBySpace) {
         // Use our knowledge from the first parse to tell what this should be
         match *self {
             // A data volume in kibibytes
@@ -233,23 +231,23 @@ impl MemInfoRecord {
 #[cfg(test)]
 mod tests {
     use super::{ByteSize, MemInfoData, MemInfoRecord, MemInfoSampler,
-                SplitSpace};
+                SplitLinesBySpace};
 
     /// Check that meminfo record initialization works well
     #[test]
     fn init_record() {
         // Data volume record
-        let data_vol_record = MemInfoRecord::new(SplitSpace::new("42 kB"));
+        let data_vol_record = MemInfoRecord::new(&mut split_record("42 kB"));
         assert_eq!(data_vol_record, MemInfoRecord::DataVolume(Vec::new()));
         assert_eq!(data_vol_record.len(), 0);
 
         // Counter record
-        let counter_record = MemInfoRecord::new(SplitSpace::new("713705"));
+        let counter_record = MemInfoRecord::new(&mut split_record("713705"));
         assert_eq!(counter_record, MemInfoRecord::Counter(Vec::new()));
         assert_eq!(counter_record.len(), 0);
 
         // Unsupported record
-        let bad_record = MemInfoRecord::new(SplitSpace::new("73 MiB"));
+        let bad_record = MemInfoRecord::new(&mut split_record("73 MiB"));
         assert_eq!(bad_record, MemInfoRecord::Unsupported(0));
         assert_eq!(bad_record.len(), 0);
     }
@@ -258,21 +256,21 @@ mod tests {
     #[test]
     fn parse_record() {
         // Data volume record
-        let mut data_vol_record = MemInfoRecord::new(SplitSpace::new("24 kB"));
-        data_vol_record.push(SplitSpace::new("512 kB"));
-        assert_eq!(data_vol_record,
+        let mut size_record = MemInfoRecord::new(&mut split_record("24 kB"));
+        size_record.push(&mut split_record("512 kB"));
+        assert_eq!(size_record,
                    MemInfoRecord::DataVolume(vec![ByteSize::kib(512)]));
-        assert_eq!(data_vol_record.len(), 1);
+        assert_eq!(size_record.len(), 1);
 
         // Counter record
-        let mut counter_record = MemInfoRecord::new(SplitSpace::new("1337"));
-        counter_record.push(SplitSpace::new("371830"));
+        let mut counter_record = MemInfoRecord::new(&mut split_record("1337"));
+        counter_record.push(&mut split_record("371830"));
         assert_eq!(counter_record, MemInfoRecord::Counter(vec![371830]));
         assert_eq!(counter_record.len(), 1);
 
         // Unsupported record
-        let mut bad_record = MemInfoRecord::new(SplitSpace::new("57 TiB"));
-        bad_record.push(SplitSpace::new("332 PiB"));
+        let mut bad_record = MemInfoRecord::new(&mut split_record("57 TiB"));
+        bad_record.push(&mut split_record("332 PiB"));
         assert_eq!(bad_record, MemInfoRecord::Unsupported(1));
         assert_eq!(bad_record.len(), 1);
     }
@@ -320,7 +318,7 @@ mod tests {
         let mut single_info = MemInfoData::new(&info);
         single_info.push(&info);
         expected = MemInfoData::new(&info);
-        expected.records[0].push(SplitSpace::new("1234 kB"));
+        expected.records[0].push(&mut split_record("1234 kB"));
         assert_eq!(single_info, expected);
         assert_eq!(expected.len(), 1);
 
@@ -329,8 +327,8 @@ mod tests {
         let mut double_info = MemInfoData::new(&info);
         double_info.push(&info);
         expected = MemInfoData::new(&info);
-        expected.records[0].push(SplitSpace::new("1234 kB"));
-        expected.records[1].push(SplitSpace::new("42"));
+        expected.records[0].push(&mut split_record("1234 kB"));
+        expected.records[1].push(&mut split_record("42"));
         assert_eq!(double_info, expected);
         assert_eq!(expected.len(), 1);
     }
@@ -354,6 +352,13 @@ mod tests {
         assert_eq!(stats.samples.len(), 1);
         stats.sample().expect("Failed to sample meminfo twice");
         assert_eq!(stats.samples.len(), 2);
+    }
+
+    /// INTERNAL: Pre-process a line of text for ingestion by MemInfoRecord
+    fn split_record(input: &str) -> SplitLinesBySpace {
+        let mut line_splitter = SplitLinesBySpace::new(input);
+        line_splitter.next_line();
+        line_splitter
     }
 }
 
