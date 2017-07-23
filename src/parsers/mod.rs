@@ -245,7 +245,7 @@ impl<'a> SplitLinesBySpace<'a> {
     /// Create a line- and space-splitting iterator
     pub fn new(target: &'a str) -> Self {
         let mut char_iter = itertools::put_back(target.char_indices());
-        let input_empty = Self::at_end(&mut char_iter);
+        let input_empty = Self::at_end_impl(&mut char_iter);
         Self {
             target,
             char_iter,
@@ -275,7 +275,7 @@ impl<'a> SplitLinesBySpace<'a> {
                     // A newline was encountered. Check if there is text after
                     // it or it's just trailing at the end of the input.
                     Some((_, '\n')) => {
-                        if Self::at_end(&mut self.char_iter) {
+                        if self.at_end() {
                             self.status = LineSpaceSplitterStatus::AtInputEnd;
                             return false;
                         } else {
@@ -299,8 +299,13 @@ impl<'a> SplitLinesBySpace<'a> {
         }
     }
 
-    /// INTERNAL: Is there still a character left in the internal iterator?
-    fn at_end(iter: &mut PutBack<CharIndices<'a>>) -> bool {
+    /// INTERNAL: Tell whether we reached the end of the internal iterator
+    fn at_end(&mut self) -> bool {
+        Self::at_end_impl(&mut self.char_iter)
+    }
+
+    /// INTERNAL: Implementation of at_end, must be separate for new() to use it
+    fn at_end_impl(iter: &mut PutBack<CharIndices<'a>>) -> bool {
         if let Some(item) = iter.next() {
             iter.put_back(item);
             false
@@ -331,7 +336,7 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
                 // of space-separated data that it's time to yield control back
                 // to the line iterator (which we configure along the way).
                 Some((_, '\n')) => {
-                    self.status = if Self::at_end(&mut self.char_iter) {
+                    self.status = if self.at_end() {
                                       LineSpaceSplitterStatus::AtInputEnd
                                   } else {
                                       LineSpaceSplitterStatus::AtLineStart
@@ -365,6 +370,7 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
                 },
 
                 // Newlines also terminate words, but we must put them back in
+                // because we want to subsequently signal them as a None.
                 Some((last_idx, '\n')) => {
                     self.char_iter.put_back((last_idx, '\n'));
                     return Some(&self.target[first_idx..last_idx]);
@@ -373,7 +379,7 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
                 // We are still in the middle of the word: move on
                 Some(_) => continue,
 
-                // We reached the end of the string: output the last word
+                // We reached the end of the input: output the last word
                 None => return Some(&self.target[first_idx..]),
             }
         }
