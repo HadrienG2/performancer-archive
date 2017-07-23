@@ -113,7 +113,7 @@ impl MemInfoData {
         for record in self.records.iter_mut() {
             // The beginning of parsing is the same as before: split by spaces.
             // But this time, we discard the header, as we already know it.
-            splitter.next_line();
+            assert!(splitter.next_line(), "A meminfo record has disappeared");
             splitter.next();
 
             // Forward the data to the appropriate parser
