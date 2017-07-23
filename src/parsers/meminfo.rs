@@ -237,17 +237,17 @@ mod tests {
     #[test]
     fn init_record() {
         // Data volume record
-        let data_vol_record = MemInfoRecord::new(&mut SplitLinesBySpace::new("42 kB"));
+        let data_vol_record = MemInfoRecord::new(&mut split_record("42 kB"));
         assert_eq!(data_vol_record, MemInfoRecord::DataVolume(Vec::new()));
         assert_eq!(data_vol_record.len(), 0);
 
         // Counter record
-        let counter_record = MemInfoRecord::new(&mut SplitLinesBySpace::new("713705"));
+        let counter_record = MemInfoRecord::new(&mut split_record("713705"));
         assert_eq!(counter_record, MemInfoRecord::Counter(Vec::new()));
         assert_eq!(counter_record.len(), 0);
 
         // Unsupported record
-        let bad_record = MemInfoRecord::new(&mut SplitLinesBySpace::new("73 MiB"));
+        let bad_record = MemInfoRecord::new(&mut split_record("73 MiB"));
         assert_eq!(bad_record, MemInfoRecord::Unsupported(0));
         assert_eq!(bad_record.len(), 0);
     }
@@ -256,21 +256,21 @@ mod tests {
     #[test]
     fn parse_record() {
         // Data volume record
-        let mut data_vol_record = MemInfoRecord::new(&mut SplitLinesBySpace::new("24 kB"));
-        data_vol_record.push(&mut SplitLinesBySpace::new("512 kB"));
-        assert_eq!(data_vol_record,
+        let mut size_record = MemInfoRecord::new(&mut split_record("24 kB"));
+        size_record.push(&mut split_record("512 kB"));
+        assert_eq!(size_record,
                    MemInfoRecord::DataVolume(vec![ByteSize::kib(512)]));
-        assert_eq!(data_vol_record.len(), 1);
+        assert_eq!(size_record.len(), 1);
 
         // Counter record
-        let mut counter_record = MemInfoRecord::new(&mut SplitLinesBySpace::new("1337"));
-        counter_record.push(&mut SplitLinesBySpace::new("371830"));
+        let mut counter_record = MemInfoRecord::new(&mut split_record("1337"));
+        counter_record.push(&mut split_record("371830"));
         assert_eq!(counter_record, MemInfoRecord::Counter(vec![371830]));
         assert_eq!(counter_record.len(), 1);
 
         // Unsupported record
-        let mut bad_record = MemInfoRecord::new(&mut SplitLinesBySpace::new("57 TiB"));
-        bad_record.push(&mut SplitLinesBySpace::new("332 PiB"));
+        let mut bad_record = MemInfoRecord::new(&mut split_record("57 TiB"));
+        bad_record.push(&mut split_record("332 PiB"));
         assert_eq!(bad_record, MemInfoRecord::Unsupported(1));
         assert_eq!(bad_record.len(), 1);
     }
@@ -318,7 +318,7 @@ mod tests {
         let mut single_info = MemInfoData::new(&info);
         single_info.push(&info);
         expected = MemInfoData::new(&info);
-        expected.records[0].push(&mut SplitLinesBySpace::new("1234 kB"));
+        expected.records[0].push(&mut split_record("1234 kB"));
         assert_eq!(single_info, expected);
         assert_eq!(expected.len(), 1);
 
@@ -327,8 +327,8 @@ mod tests {
         let mut double_info = MemInfoData::new(&info);
         double_info.push(&info);
         expected = MemInfoData::new(&info);
-        expected.records[0].push(&mut SplitLinesBySpace::new("1234 kB"));
-        expected.records[1].push(&mut SplitLinesBySpace::new("42"));
+        expected.records[0].push(&mut split_record("1234 kB"));
+        expected.records[1].push(&mut split_record("42"));
         assert_eq!(double_info, expected);
         assert_eq!(expected.len(), 1);
     }
@@ -352,6 +352,13 @@ mod tests {
         assert_eq!(stats.samples.len(), 1);
         stats.sample().expect("Failed to sample meminfo twice");
         assert_eq!(stats.samples.len(), 2);
+    }
+
+    /// INTERNAL: Pre-process a line of text for ingestion by MemInfoRecord
+    fn split_record(input: &str) -> SplitLinesBySpace {
+        let mut line_splitter = SplitLinesBySpace::new(input);
+        line_splitter.next_line();
+        line_splitter
     }
 }
 
