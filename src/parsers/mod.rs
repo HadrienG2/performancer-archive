@@ -309,7 +309,8 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
         // We expect the caller to have properly called next_line() beforehand
         assert_eq!(self.status, LineSpaceSplitterStatus::InsideLine);
 
-        // Find the first non-space character before the end of line (if any)
+        // Find the first non-space character before the end of line (if any):
+        // that will be the start of the next word.
         let first_idx;
         loop {
             match self.char_iter.next() {
@@ -342,18 +343,24 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
             }
         }
 
-        // Look for a space or newline as a word terminator. Do not swallow
-        // newlines or None, as we must produce None on the next iteration.
-        while let Some(&(idx, ch)) = self.char_iter.peek() {
-            if (ch == ' ') || (ch == '\n') {
-                return Some(&self.target[first_idx..idx]);
-            } else {
-                self.char_iter.next();
+        // We are now inside of a word, and looking for its end. From now on,
+        // we need to be more careful: if the word completes at the end of the
+        // current line, we will need to output two things in a row, first the
+        // word, then a None. We handle that by peeking instead of iterating.
+        loop {
+            match self.char_iter.peek() {
+                // We reached the end of a word: output said word.
+                Some(&(idx, ' ')) | Some(&(idx, '\n')) => {
+                    return Some(&self.target[first_idx..idx]);
+                },
+
+                // We are still in the middle of the word: consume the character
+                Some(_) => { self.char_iter.next(); },
+
+                // We reached the end of the string: output the last word
+                None => return Some(&self.target[first_idx..]),
             }
         }
-
-        // If we see the end of the string, that will be our terminator
-        return Some(&self.target[first_idx..]);
     }
 }
 //
