@@ -300,11 +300,13 @@ impl<'a> SplitLinesBySpace<'a> {
     }
 
     /// INTERNAL: Tell whether we reached the end of the internal iterator
+    #[inline]
     fn at_end(&mut self) -> bool {
         Self::at_end_impl(&mut self.char_iter)
     }
 
     /// INTERNAL: Implementation of at_end, must be separate for new() to use it
+    #[inline]
     fn at_end_impl(iter: &mut PutBack<CharIndices<'a>>) -> bool {
         if let Some(item) = iter.next() {
             iter.put_back(item);
