@@ -19,7 +19,8 @@ pub mod stat;
 pub mod uptime;
 pub mod version;
 
-use itertools::{self, PutBack};
+use std::ascii::AsciiExt;
+use std::slice;
 use std::str::CharIndices;
 use std::time::Duration;
 
@@ -170,7 +171,7 @@ pub struct SplitLinesBySpace<'a> {
     target: &'a str,
 
     /// Iterator over the characters and their byte indices
-    char_iter: PutBack<CharIndices<'a>>,
+    char_iter: FastCharIndices<'a>,
 
     /// Where we are within the input (at the beginning of a line, somewhere
     /// inside a line, or at the end of the input string)
@@ -180,7 +181,7 @@ pub struct SplitLinesBySpace<'a> {
 impl<'a> SplitLinesBySpace<'a> {
     /// Create a line- and space-splitting iterator
     pub fn new(target: &'a str) -> Self {
-        let mut char_iter = itertools::put_back(target.char_indices());
+        let mut char_iter = FastCharIndices::new(target);
         let input_empty = Self::at_end_impl(&mut char_iter);
         Self {
             target,
@@ -210,7 +211,7 @@ impl<'a> SplitLinesBySpace<'a> {
                 match self.char_iter.next() {
                     // A newline was encountered. Check if there is text after
                     // it or it's just trailing at the end of the input.
-                    Some((_, '\n')) => {
+                    Some('\n') => {
                         if self.at_end() {
                             self.status = LineSpaceSplitterStatus::AtInputEnd;
                             return false;
@@ -220,7 +221,7 @@ impl<'a> SplitLinesBySpace<'a> {
                     }
 
                     // Some other character was encountered. Continue iteration.
-                    Some((_, _)) => continue,
+                    Some(_) => continue,
 
                     // We reached the end of the input, and will stop there.
                     None => {
@@ -243,7 +244,7 @@ impl<'a> SplitLinesBySpace<'a> {
 
     /// INTERNAL: Implementation of at_end, must be separate for new() to use it
     #[inline]
-    fn at_end_impl(iter: &mut PutBack<CharIndices<'a>>) -> bool {
+    fn at_end_impl(iter: &mut FastCharIndices<'a>) -> bool {
         if let Some(item) = iter.next() {
             iter.put_back(item);
             false
@@ -268,12 +269,12 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
         loop {
             match self.char_iter.next() {
                 // Discard all the spaces along the way.
-                Some((_, ' ')) => continue,
+                Some(' ') => continue,
 
                 // Output a None when a newline is reached, to signal the client
                 // of space-separated data that it's time to yield control back
                 // to the line iterator (which we configure along the way).
-                Some((_, '\n')) => {
+                Some('\n') => {
                     self.status = if self.at_end() {
                                       LineSpaceSplitterStatus::AtInputEnd
                                   } else {
@@ -283,8 +284,8 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
                 },
 
                 // Record the index of the first non-space character
-                Some((idx, _)) => {
-                    first_idx = idx;
+                Some(_) => {
+                    first_idx = self.char_iter.last_index();
                     break;
                 },
 
@@ -303,14 +304,16 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
         loop {
             match self.char_iter.next() {
                 // We reached the end of a word: output said word.
-                Some((last_idx, ' ')) => {
+                Some(' ') => {
+                    let last_idx = self.char_iter.last_index();
                     return Some(&self.target[first_idx..last_idx]);
                 },
 
                 // Newlines also terminate words, but we must put them back in
                 // because we want to subsequently signal them as a None.
-                Some((last_idx, '\n')) => {
-                    self.char_iter.put_back((last_idx, '\n'));
+                Some('\n') => {
+                    let last_idx = self.char_iter.last_index();
+                    self.char_iter.put_back('\n');
                     return Some(&self.target[first_idx..last_idx]);
                 }
 
@@ -323,9 +326,75 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
         }
     }
 }
-//
+///
+/// State machine used for iterating over lines
 #[derive(Debug, PartialEq)]
 enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
+///
+/// A conceptual cousin of PutBack<CharIndices>, heavily optimized for our needs
+/// of ASCII-only parsing, frequent character lookup with infrequent index
+/// lookup, and occasional putting back of a character.
+struct FastCharIndices<'a> {
+    /// Iterator over the characters of an ASCII string
+    char_iter: slice::Iter<'a, u8>,
+
+    /// Byte index of the _next_ character
+    next_char_index: usize,
+
+    /// Facility to put one character back into the iterator
+    put_back_buf: Option<char>,
+}
+//
+impl<'a> FastCharIndices<'a> {
+    /// Initialize the iterator
+    #[inline]
+    fn new(input: &'a str) -> Self {
+        Self {
+            char_iter: input.as_bytes().iter(),
+            next_char_index: 0,
+            put_back_buf: None,
+        }
+    }
+
+    /// Tell what was the index of the last character. Requires the knowledge
+    /// of said character, which FastCharIndices does not keep around.
+    #[inline]
+    fn last_index(&self) -> usize {
+        self.next_char_index - 1
+    }
+
+    /// Put a character back in. You should only put back one character at a
+    /// time, and you should not do so before the iterator has outputted
+    /// anything, and after it has outputted its final None.
+    #[inline]
+    fn put_back(&mut self, ch: char) {
+        debug_assert_eq!(self.put_back_buf, None);
+        self.put_back_buf = Some(ch);
+        self.next_char_index -= 1;
+    }
+}
+///
+/// Iterate over characters (use index() to know about the character's index)
+impl<'a> Iterator for FastCharIndices<'a> {
+    type Item = char;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        // Take from the put_back_buffer if full, otherwise from the iterator
+        let result = if self.put_back_buf.is_some() {
+            self.put_back_buf.take()
+        } else {
+            self.char_iter.next().map(|b| { debug_assert!(b.is_ascii());
+                                            char::from(*b) })
+        };
+
+        // Increment the character counter
+        self.next_char_index += 1;
+
+        // Return the freshly read character
+        result
+    }
+}
 
 
 /// Unit tests

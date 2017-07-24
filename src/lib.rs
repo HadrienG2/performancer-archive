@@ -7,7 +7,6 @@
 
 extern crate bytesize;
 extern crate chrono;
-extern crate itertools;
 #[macro_use] extern crate lazy_static;
 extern crate libc;
 extern crate regex;
