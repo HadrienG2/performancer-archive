@@ -6,7 +6,7 @@ mod paging;
 
 use ::ProcFileReader;
 use chrono::{DateTime, TimeZone, Utc};
-use parsers::SplitSpace;
+use parsers::SplitLinesBySpace;
 use self::cpu::CPUStatData;
 use self::interrupt::InterruptStatData;
 use self::paging::PagingStatData;
@@ -135,15 +135,13 @@ impl StatData {
         let mut num_cpu_timers = 0u8;
 
         // For each line of the initial contents of /proc/stat...
-        for line in initial_contents.lines() {
-            // ...decompose according to whitespace...
-            let mut whitespace_iter = SplitSpace::new(line);
-
+        let mut splitter = SplitLinesBySpace::new(initial_contents);
+        while splitter.next_line() {
             // ...and check the header
-            match whitespace_iter.next().expect("Unexpected empty line") {
+            match splitter.next().expect("Unexpected empty line") {
                 // Statistics on all CPUs (should come first)
                 "cpu" => {
-                    num_cpu_timers = whitespace_iter.count() as u8;
+                    num_cpu_timers = splitter.word_count() as u8;
                     data.all_cpus = Some(CPUStatData::new(num_cpu_timers));
                     data.line_target.push(StatDataMember::AllCPUs);
                 }
@@ -151,7 +149,7 @@ impl StatData {
                 // Statistics on a specific CPU thread (should be consistent
                 // with the global stats and come after them)
                 header if &header[0..3] == "cpu" => {
-                    assert_eq!(whitespace_iter.count() as u8, num_cpu_timers,
+                    assert_eq!(splitter.word_count() as u8, num_cpu_timers,
                                "Inconsistent amount of CPU timers");
                     data.each_cpu.push(CPUStatData::new(num_cpu_timers));
                     data.line_target.push(StatDataMember::EachCPU);
@@ -171,7 +169,7 @@ impl StatData {
 
                 // Hardware interrupt statistics
                 "intr" => {
-                    let num_interrupts = (whitespace_iter.count() - 1) as u16;
+                    let num_interrupts = (splitter.word_count() - 1) as u16;
                     data.interrupts = Some(
                         InterruptStatData::new(num_interrupts)
                     );
@@ -187,8 +185,8 @@ impl StatData {
                 // Boot time
                 "btime" => {
                     let btime_str =
-                        whitespace_iter.next().expect("Missing boot time data");
-                    debug_assert_eq!(whitespace_iter.next(), None,
+                        splitter.next().expect("Missing boot time data");
+                    debug_assert_eq!(splitter.next(), None,
                                      "Unexpected extra boot time data");
                     data.boot_time = Some(
                         Utc.timestamp(
@@ -220,7 +218,7 @@ impl StatData {
 
                 // Softirq statistics
                 "softirq" => {
-                    let num_interrupts = (whitespace_iter.count() - 1) as u16;
+                    let num_interrupts = (splitter.word_count() - 1) as u16;
                     data.softirqs = Some(
                         InterruptStatData::new(num_interrupts)
                     );
@@ -248,46 +246,48 @@ impl StatData {
         let mut cpu_iter = self.each_cpu.iter_mut();
 
         // This time, we know how lines of /proc/stat map to our members
-        for (line, target) in file_contents.lines()
-                                           .zip(self.line_target.iter()) {
+        let mut splitter = SplitLinesBySpace::new(file_contents);
+        for target in self.line_target.iter() {
             // The beginning of parsing is the same as before: split by spaces.
             // But this time, we discard the header, as we already know it.
-            let mut stats = SplitSpace::new(line);
-            stats.next();
+            assert!(splitter.next_line(), "A stat record has disappeared");
+            splitter.next();
 
             // Forward the /proc/stat data to the appropriate parser
             match *target {
                 StatDataMember::AllCPUs => {
-                    Self::force_push(&mut self.all_cpus, stats);
+                    Self::force_push(&mut self.all_cpus, &mut splitter);
                 },
                 StatDataMember::EachCPU => {
                     cpu_iter.next()
                             .expect("Per-cpu stats do not match each_cpu.len()")
-                            .push(stats);
+                            .push(&mut splitter);
                 },
                 StatDataMember::Paging => {
-                    Self::force_push(&mut self.paging, stats);
+                    Self::force_push(&mut self.paging, &mut splitter);
                 },
                 StatDataMember::Swapping => {
-                    Self::force_push(&mut self.swapping, stats);
+                    Self::force_push(&mut self.swapping, &mut splitter);
                 },
                 StatDataMember::Interrupts => {
-                    Self::force_push(&mut self.interrupts, stats);
+                    Self::force_push(&mut self.interrupts, &mut splitter);
                 },
                 StatDataMember::ContextSwitches => {
-                    Self::force_push(&mut self.context_switches, stats);
+                    Self::force_push(&mut self.context_switches, &mut splitter);
                 },
                 StatDataMember::ProcessForks => {
-                    Self::force_push(&mut self.process_forks, stats);
+                    Self::force_push(&mut self.process_forks, &mut splitter);
                 },
                 StatDataMember::RunnableProcesses => {
-                    Self::force_push(&mut self.runnable_processes, stats);
+                    Self::force_push(&mut self.runnable_processes,
+                                     &mut splitter);
                 },
                 StatDataMember::BlockedProcesses => {
-                    Self::force_push(&mut self.blocked_processes, stats);
+                    Self::force_push(&mut self.blocked_processes,
+                                     &mut splitter);
                 },
                 StatDataMember::SoftIRQs => {
-                    Self::force_push(&mut self.softirqs, stats);
+                    Self::force_push(&mut self.softirqs, &mut splitter);
                 }
                 StatDataMember::BootTime | StatDataMember::Unsupported => {},
             }
@@ -325,12 +325,12 @@ impl StatData {
 
     /// INTERNAL: Helpful wrapper for pushing into optional containers that we
     ///           actually know from additional metadata to be around
-    fn force_push<T>(store: &mut Option<T>, stats: SplitSpace)
+    fn force_push<T>(store: &mut Option<T>, splitter: &mut SplitLinesBySpace)
         where T: StatDataStore
     {
         store.as_mut()
              .expect("Attempted to push into a nonexistent container")
-             .push(stats);
+             .push(splitter);
     }
 
     /// INTERNAL: Update our prior knowledge of the amount of stored samples
@@ -385,7 +385,7 @@ enum StatDataMember {
 /// which exposes its ability to be filled from segmented /proc/stat contents.
 trait StatDataStore {
     /// Parse and record a sample of data from /proc/stat
-    fn push(&mut self, stats: SplitSpace);
+    fn push(&mut self, splitter: &mut SplitLinesBySpace);
 
     /// Number of data samples that were recorded so far
     fn len(&self) -> usize;
@@ -397,10 +397,10 @@ impl<T, U> StatDataStore for Vec<T>
     where T: FromStr<Err=U>,
           U: Debug
 {
-    fn push(&mut self, mut stats: SplitSpace) {
-        self.push(stats.next().expect("Expected statistical data")
+    fn push(&mut self, splitter: &mut SplitLinesBySpace) {
+        self.push(splitter.next().expect("Expected statistical data")
                        .parse().expect("Failed to parse statistical data"));
-        debug_assert!(stats.next().is_none(),
+        debug_assert!(splitter.next().is_none(),
                       "No other statistical data should be present");
     }
 
@@ -413,16 +413,17 @@ impl<T, U> StatDataStore for Vec<T>
 /// Unit tests
 #[cfg(test)]
 mod tests {
+    use ::parsers::split_line;
     use chrono::{TimeZone, Utc};
-    use super::{CPUStatData, InterruptStatData, PagingStatData, SplitSpace,
-                StatData, StatDataMember, StatDataStore, StatSampler};
+    use super::{CPUStatData, InterruptStatData, PagingStatData, StatData,
+                StatDataMember, StatDataStore, StatSampler};
 
     /// Check that scalar statistics parsing works as expected
     #[test]
     fn parse_scalar_stat() {
         let mut scalar_stats = Vec::<u64>::new();
         assert_eq!(StatDataStore::len(&scalar_stats), 0);
-        StatDataStore::push(&mut scalar_stats, SplitSpace::new("123"));
+        StatDataStore::push(&mut scalar_stats, &mut split_line("123"));
         assert_eq!(scalar_stats, vec![123]);
         assert_eq!(StatDataStore::len(&scalar_stats), 1);
     }
@@ -554,7 +555,7 @@ mod tests {
         expected = StatData::new(&stats);
         expected.all_cpus.as_mut()
                          .expect("CPU stats incorrectly marked as missing")
-                         .push(SplitSpace::new("1 2 3 4"));
+                         .push(&mut split_line("1 2 3 4"));
         assert_eq!(global_cpu_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -566,9 +567,9 @@ mod tests {
         expected = StatData::new(&stats);
         expected.all_cpus.as_mut()
                          .expect("CPU stats incorrectly marked as missing")
-                         .push(SplitSpace::new("1 2 3 4"));
-        expected.each_cpu[0].push(SplitSpace::new("0 1 1 3"));
-        expected.each_cpu[1].push(SplitSpace::new("1 1 2 1"));
+                         .push(&mut split_line("1 2 3 4"));
+        expected.each_cpu[0].push(&mut split_line("0 1 1 3"));
+        expected.each_cpu[1].push(&mut split_line("1 1 2 1"));
         assert_eq!(local_cpu_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -579,7 +580,7 @@ mod tests {
         expected = StatData::new(&stats);
         expected.paging.as_mut()
                        .expect("Paging stats incorrectly marked as missing")
-                       .push(SplitSpace::new("42 43"));
+                       .push(&mut split_line("42 43"));
         assert_eq!(paging_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -590,7 +591,7 @@ mod tests {
         expected = StatData::new(&stats);
         expected.softirqs.as_mut()
                          .expect("Softirq stats incorrectly marked as missing")
-                         .push(SplitSpace::new("94651 1561 21211 12 71867"));
+                         .push(&mut split_line("94651 1561 21211 12 71867"));
         assert_eq!(softirq_stats, expected);
         assert_eq!(expected.len(), 1);
     }

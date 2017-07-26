@@ -1,7 +1,7 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the "cpu" sections of /proc/stat.
 
-use ::parsers::SplitSpace;
+use ::parsers::SplitLinesBySpace;
 use libc;
 use std::time::Duration;
 use super::StatDataStore;
@@ -83,7 +83,7 @@ impl CPUStatData {
 //
 impl StatDataStore for CPUStatData {
     /// Parse CPU statistics and add them to the internal data store
-    fn push(&mut self, mut stats: SplitSpace) {
+    fn push(&mut self, stats: &mut SplitLinesBySpace) {
         // This scope is needed to please rustc's current borrow checker
         {
             // This is how we parse the next duration from the input (if any)
@@ -164,8 +164,9 @@ lazy_static! {
 /// Unit tests
 #[cfg(test)]
 mod tests {
+    use ::parsers::split_line;
     use std::time::Duration;
-    use super::{CPUStatData, SplitSpace, StatDataStore, TICKS_PER_SEC};
+    use super::{CPUStatData, StatDataStore, TICKS_PER_SEC};
 
     /// Check that CPU statistics initialization works as expected
     #[test]
@@ -207,7 +208,7 @@ mod tests {
         );
 
         // Check that "old" CPU stats are parsed properly
-        oldest_stats.push(SplitSpace::new("165 18 96 1"));
+        oldest_stats.push(&mut split_line("165 18 96 1"));
         assert_eq!(oldest_stats.user_time,   vec![tick_duration*165]);
         assert_eq!(oldest_stats.nice_time,   vec![tick_duration*18]);
         assert_eq!(oldest_stats.system_time, vec![tick_duration*96]);
@@ -217,14 +218,14 @@ mod tests {
 
         // Check that "extended" stats are parsed as well
         let mut first_ext_stats = CPUStatData::new(5);
-        first_ext_stats.push(SplitSpace::new("9 698 6521 151 56"));
+        first_ext_stats.push(&mut split_line("9 698 6521 151 56"));
         assert_eq!(first_ext_stats.io_wait_time, Some(vec![tick_duration*56]));
         assert!(first_ext_stats.irq_time.is_none());
         assert_eq!(first_ext_stats.len(), 1);
 
         // Check that "complete" stats are parsed as well
         let mut latest_stats = CPUStatData::new(10);
-        latest_stats.push(SplitSpace::new("18 9616 11 941 5 51 9 615 62 14"));
+        latest_stats.push(&mut split_line("18 9616 11 941 5 51 9 615 62 14"));
         assert_eq!(latest_stats.io_wait_time,    Some(vec![tick_duration*5]));
         assert_eq!(latest_stats.guest_nice_time, Some(vec![tick_duration*14]));
         assert_eq!(latest_stats.len(), 1);
