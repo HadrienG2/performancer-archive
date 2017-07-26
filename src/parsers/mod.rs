@@ -20,7 +20,6 @@ pub mod uptime;
 pub mod version;
 
 use std::ascii::AsciiExt;
-use std::str::CharIndices;
 use std::time::Duration;
 
 
@@ -61,76 +60,6 @@ fn parse_duration_secs(input: &str) -> Duration {
 
     // Return the Duration that we just parsed
     Duration::new(seconds, nanoseconds)
-}
-
-
-/// Fast SplitWhitespace specialization for space-separated strings
-///
-/// The SplitWhitespace iterator from the Rust standard library is great for
-/// general-purpose Unicode string parsing, but on the space-separated ASCII
-/// lines from /proc, it can spend a lot of time looking for exotic whitespace
-/// characters that will never show up. On complex files like /proc/stat, this
-/// can become a performance killer.
-///
-/// This implementation is optimized for such contents by building on the
-/// assumption that the only kind of separator that can appear is spaces.
-///
-/// Note that this means, in particular, that it does *not* understand newlines.
-/// In a sense, it operates under the assumption that there is already some
-/// newline separator like string.lines() operating on top of it.
-///
-struct SplitSpace<'a> {
-    /// String which we are trying to split
-    target: &'a str,
-
-    /// Iterator over the characters and their byte indices
-    char_iter: CharIndices<'a>,
-}
-//
-impl<'a> SplitSpace<'a> {
-    /// Create a space-splitting iterator
-    fn new(target: &'a str) -> Self {
-        Self {
-            target,
-            char_iter: target.char_indices(),
-        }
-    }
-}
-//
-impl<'a> Iterator for SplitSpace<'a> {
-    /// We're outputting strings
-    type Item = &'a str;
-
-    /// This is how one iterates the space-separated words
-    fn next(&mut self) -> Option<Self::Item> {
-        // Find the first non-space character (if any)
-        let first_idx;
-        loop {
-            match self.char_iter.next() {
-                // Ignore spaces
-                Some((_, ' ')) => continue,
-
-                // Record the index of the first non-space character
-                Some((idx, _)) => {
-                    first_idx = idx;
-                    break;
-                },
-
-                // If there are no words left, return None
-                None => return None,
-            }
-        }
-
-        // Look for a space as a word terminator
-        while let Some((idx, ch)) = self.char_iter.next() {
-            if ch == ' ' {
-                return Some(&self.target[first_idx..idx]);
-            }
-        }
-
-        // If no space shows up, the end of the string is our terminator
-        return Some(&self.target[first_idx..]);
-    }
 }
 
 
@@ -233,6 +162,16 @@ impl<'a> SplitLinesBySpace<'a> {
             // There is no next line, we are at the end of the input string
             LineSpaceSplitterStatus::AtInputEnd => return false,
         }
+    }
+
+    /// Consume the current line, indicating how many space-separated words were
+    /// encountered, but without consuming the entire iterator.
+    pub fn word_count(&mut self) -> usize {
+        let mut word_count = 0usize;
+        while self.next().is_some() {
+            word_count += 1;
+        }
+        word_count
     }
 }
 //
@@ -374,12 +313,23 @@ impl<'a> Iterator for FastCharIndices<'a> {
         result
     }
 }
+///
+///
+/// Testing code often needs to split a single line of text, even though the
+/// Real Thing needs to operate over multiple lines of text. We got you covered.
+///
+#[allow(dead_code)]
+fn split_line(input: &str) -> SplitLinesBySpace {
+    let mut line_splitter = SplitLinesBySpace::new(input);
+    assert!(line_splitter.next_line());
+    line_splitter
+}
 
 
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::{SplitLinesBySpace, SplitSpace};
+    use super::SplitLinesBySpace;
     use std::time::Duration;
 
     /// Check that our Duration parser works as expected
@@ -404,45 +354,6 @@ mod tests {
         // Sub-nanosecond precision is truncated
         assert_eq!(super::parse_duration_secs("7.8901234567"),
                    Duration::new(7, 890_123_456));
-    }
-
-    /// Check that SplitSpace works as intended
-    #[test]
-    fn split_space() {
-        // Split the empty string
-        let mut split_empty = SplitSpace::new("");
-        assert_eq!(split_empty.next(), None);
-
-        // Split a string full of space
-        let mut split_space = SplitSpace::new("   ");
-        assert_eq!(split_space.next(), None);
-
-        // Split a string containing only a word
-        let mut split_word = SplitSpace::new("42");
-        assert_eq!(split_word.next(), Some("42"));
-        assert_eq!(split_word.next(), None);
-
-        // ...with leading space
-        let mut split_leading_space = SplitSpace::new("  42");
-        assert_eq!(split_leading_space.next(), Some("42"));
-        assert_eq!(split_leading_space.next(), None);
-
-        // ...with trailing space
-        let mut split_trailing_space = SplitSpace::new("  42 ");
-        assert_eq!(split_trailing_space.next(), Some("42"));
-        assert_eq!(split_trailing_space.next(), None);
-
-        // Split a string containing two words
-        let mut split_two_words = SplitSpace::new("42 43");
-        assert_eq!(split_two_words.next(), Some("42"));
-        assert_eq!(split_two_words.next(), Some("43"));
-        assert_eq!(split_two_words.next(), None);
-
-        // ...with leading and trailing space
-        let mut split_trailing_pair = SplitSpace::new("  42 43 ");
-        assert_eq!(split_trailing_pair.next(), Some("42"));
-        assert_eq!(split_trailing_pair.next(), Some("43"));
-        assert_eq!(split_trailing_pair.next(), None);
     }
 
     /// Check that SplitLinesBySpace works as intended, both when skipping
