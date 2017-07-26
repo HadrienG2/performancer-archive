@@ -316,7 +316,7 @@ enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
 ///
 /// A conceptual cousin of PutBack<CharIndices>, heavily optimized for our needs
 /// of ASCII-only parsing, frequent character lookup with infrequent index
-/// lookup, and occasional putting back of a character.
+/// lookup, and occasional backtracking on a character.
 ///
 struct FastCharIndices<'a> {
     /// Byte-wise view of the original ASCII string
