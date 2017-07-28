@@ -372,9 +372,9 @@ mod benchmarks {
     fn readout_overhead() {
         let mut reader =
             ProcFileReader::open("/proc/meminfo")
-                           .expect("Failed to open /proc/meminfo");
+                           .expect("Failed to open memory info");
         testbench::benchmark(400_000, || {
-            reader.sample(|_| {}).expect("Failed to read /proc/meminfo");
+            reader.sample(|_| {}).expect("Failed to read memory info");
         });
     }
 
@@ -384,9 +384,9 @@ mod benchmarks {
     fn sampling_overhead() {
         let mut stat =
             MemInfoSampler::new()
-                           .expect("Failed to create a /proc/meminfo sampler");
+                           .expect("Failed to create a memory info sampler");
         testbench::benchmark(400_000, || {
-            stat.sample().expect("Failed to sample /proc/meminfo");
+            stat.sample().expect("Failed to sample memory info");
         });
     }
 }

@@ -164,7 +164,7 @@ mod benchmarks {
     fn readout_overhead() {
         let mut reader =
             ProcFileReader::open("/proc/uptime")
-                           .expect("Failed to access /proc/uptime");
+                           .expect("Failed to access uptime");
         testbench::benchmark(3_000_000, || {
             reader.sample(|_| {}).expect("Failed to sample uptime");
         });

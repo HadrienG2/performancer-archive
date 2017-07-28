@@ -634,9 +634,9 @@ mod benchmarks {
     #[ignore]
     fn readout_overhead() {
         let mut reader = ProcFileReader::open("/proc/stat")
-                                        .expect("Failed to open /proc/stat");
+                                        .expect("Failed to open CPU stats");
         testbench::benchmark(100_000, || {
-            reader.sample(|_| {}).expect("Failed to read /proc/stat");
+            reader.sample(|_| {}).expect("Failed to read CPU stats");
         });
     }
 
@@ -646,9 +646,9 @@ mod benchmarks {
     fn sampling_overhead() {
         let mut stat =
             StatSampler::new()
-                        .expect("Failed to create a /proc/stat sampler");
+                        .expect("Failed to create a CPU stats sampler");
         testbench::benchmark(100_000, || {
-            stat.sample().expect("Failed to sample /proc/stat");
+            stat.sample().expect("Failed to sample CPU stats");
         });
     }
 }
