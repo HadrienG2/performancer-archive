@@ -7,6 +7,7 @@
 //! Each submodule corresponds to one file in /proc, and is named as close to
 //! that file as allowed by the Rust module system.
 
+pub mod diskstats;
 pub mod meminfo;
 pub mod stat;
 pub mod uptime;
