@@ -1,5 +1,6 @@
 //! This module contains a sampling parser for /proc/diskstats
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 
@@ -10,17 +11,14 @@ use std::time::Duration;
 ///
 /// TODO: Complete this description after providing an initial layout
 struct DiskStatsData {
-    // TODO: File-ordered list of untagged records (as in MemInfoData), with
-    //       storage optimization for zero (as in InterruptStatData)
-    
-    // TODO: Indexes which allow someone in possession of a device name or of
-    //       a major and minor device number to find the associated record
-    // TODO: Decide whether to expose the major/minor nesting in the API or to
-    //       flatten the hierarchy and query both at the same time. One argument
-    //       in favor of the former is that major devices have their own
-    //       metadata, and fast computation of system-wide stats is best done
-    //       by summing this high-level metadata without caring about the lower-
-    //       level minor device details
+    /// List of iostat records following original file order (as in MemInfoData)
+    records: Vec<DiskStatsRecord>,
+
+    /// Index mapping device numbers to the index of the associated record
+    device_numbers_index: HashMap<DeviceNumbers, usize>,
+
+    /// Index mapping device names to the index of the associated record
+    device_name_index: HashMap<String, usize>,
 }
 
 
@@ -107,6 +105,32 @@ enum DiskStatsRecord {
         //       and partition-specific metadata.
         // TODO: Also take note of the sysfs facility for per-device stats
     },
+}
+
+
+/// Device identifier based on major and minor device numbers
+///
+/// This maps to the dev_t type from the Linux kernel, but it uses 64 bits
+/// instead of 32 bits in order to maximize the odds that this library will
+/// still work under future kernel versions.
+///
+#[derive(Eq, Hash, PartialEq)]
+struct DeviceNumbers {
+    // Major device number, usually (but not always) maps to a kernel driver
+    major: u32,
+
+    // Minor device number, arbitrarily attributed by drivers to devices
+    minor: u32,
+}
+//
+impl DeviceNumbers {
+    /// Create a new device number from a (major, minor) device id pair
+    fn new(major: u32, minor: u32) -> Self {
+        Self {
+            major,
+            minor,
+        }
+    }
 }
 
 
