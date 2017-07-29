@@ -7,9 +7,10 @@ use std::time::Duration;
 // TODO: Mechanism for sampling measurements from /proc/meminfo
 
 
-/// Data samples from /proc/meminfo, in structure-of-array layout
+/// Data samples from /proc/diskstats, in structure-of-array layout
 ///
-/// TODO: Complete this description after providing an initial layout
+/// TODO: Provide a more detailed description after implementation
+///
 struct DiskStatsData {
     /// List of iostat records following original file order (as in MemInfoData)
     records: Vec<DiskStatsRecord>,
@@ -20,9 +21,12 @@ struct DiskStatsData {
     /// Index mapping device names to the index of the associated record
     device_name_index: HashMap<String, usize>,
 }
+//
+// TODO: Implement this
+// TODO: Think carefully about hotplug and how we want to handle it
 
 
-/// Sampled records from /proc/distats, with a zero-record optimization
+/// Sampled records from /proc/diskstats, with a zero-record optimization
 /// TODO: Decide whether code sharing with the interrupt sampler is worthwhile
 /// TODO: This parser can also be used when parsing /sys/block/<device>/stat.
 ///       Do we want to implement support for that and make code reuse easy?
@@ -106,6 +110,8 @@ enum DiskStatsRecord {
         // TODO: Also take note of the sysfs facility for per-device stats
     },
 }
+//
+// TODO: Implement this
 
 
 /// Device identifier based on major and minor device numbers
