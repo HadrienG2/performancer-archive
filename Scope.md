@@ -65,7 +65,7 @@ an API which is optimized for single-shot readout (as opposed to sampling).
     /proc/version to implement system-specific hacks.
 [ ] **/proc/cpuinfo:** (one-time) System CPU configuration, has many uses
     including distinguishing hyperthreads from physical CPU cores.
-[ ] **/proc/diskstats:** Usage of block peripherals, including disk drives.
+[X] **/proc/diskstats:** Usage of block peripherals, including disk drives.
 [ ] **/proc/interrupts:** Hardware CPU interrupt counters.
 [ ] **/proc/locks:** POSIX file locks, may help nail down IO scalability issues.
 [X] **/proc/meminfo:** Detailed RAM usage statistics.

@@ -26,6 +26,8 @@ struct DiskStatsData {
 
 /// Sampled records from /proc/distats, with a zero-record optimization
 /// TODO: Decide whether code sharing with the interrupt sampler is worthwhile
+/// TODO: This parser can also be used when parsing /sys/block/<device>/stat.
+///       Do we want to implement support for that and make code reuse easy?
 enum DiskStatsRecord {
     /// If we've only ever seen zeroes, we only count the number of zeroes
     Zeroes(usize),
@@ -102,6 +104,7 @@ enum DiskStatsRecord {
         // TODO: Check for unknown fields in the implementation
         // TODO: Take note of the warning given by the kernel iostats
         //       documentation concerning kernel versions between 2.4 and 2.6.25
+        //       and partition-specific metadata.
         // TODO: Also take note of the sysfs facility for per-device stats
     },
 }
