@@ -279,6 +279,10 @@ fn split_line(input: &str) -> SplitLinesBySpace {
 mod tests {
     use super::SplitLinesBySpace;
 
+    // TODO: Test FastCharIndices in isolation
+    // TODO: Test col_count and split_line
+    // TODO: Modularize the splitter testing code
+
     /// Check that SplitLinesBySpace works as intended, both when skipping
     /// through lines and when exhaustively iterating through their words.
     #[test]
