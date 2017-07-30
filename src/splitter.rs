@@ -279,7 +279,65 @@ fn split_line(input: &str) -> SplitLinesBySpace {
 mod tests {
     use super::SplitLinesBySpace;
 
-    // TODO: Test FastCharIndices in isolation
+    // Check that FastCharIndices handles empty strings correctly
+    #[test]
+    fn empty_char_indices {
+        let mut empty_iter = FastCharIndices::new("");
+        assert!(empty_iter.is_empty());
+        assert_eq!(empty_iter.next(), None);
+    }
+
+    // Check that FastCharIndices works well on a single-char string
+    #[test]
+    fn single_char_indices {
+        // Initial state
+        let mut single_char_iter = FastCharIndices::new("@");
+        assert!(!single_char_iter.is_empty());
+
+        // Iterating through the character
+        assert_eq!(single_char_iter.next(), Some('@'));
+        assert!(single_char_iter.is_empty());
+        assert_eq!(single_char_iter.prev_index(), 0);
+
+        // Going back and starting over
+        single_char_iter.back();
+        assert!(!single_char_iter.is_empty());
+        assert_eq!(single_char_iter.next(), Some('@'));
+        assert!(single_char_iter.is_empty());
+        assert_eq!(single_char_iter.prev_index(), 0);
+
+        // Checking that we do get a None at the end
+        assert_eq!(single_char_iter.next(), None);
+    }
+
+    // Check that FastCharIndices also works well on a two-char string
+    #[test]
+    fn two_char_indices {
+        // Initial state
+        let mut dual_char_iter = FastCharIndices::new("42");
+        assert!(!dual_char_iter.is_empty());
+
+        // Iterating through the first character
+        assert_eq!(dual_char_iter.next(), Some('4'));
+        assert!(!dual_char_iter.is_empty());
+        assert_eq!(dual_char_iter.prev_index(), 0);
+
+        // Iterating through the second character
+        assert_eq!(dual_char_iter.next(), Some('2'));
+        assert!(dual_char_iter.is_empty());
+        assert_eq!(dual_char_iter.prev_index(), 1);
+
+        // Going back and starting over
+        dual_char_iter.back();
+        assert!(!dual_char_iter.is_empty());
+        assert_eq!(dual_char_iter.next(), Some('2'));
+        assert!(dual_char_iter.is_empty());
+        assert_eq!(dual_char_iter.prev_index(), 1);
+
+        // Checking that we do get a None at the end
+        assert_eq!(dual_char_iter.next(), None);
+    }
+
     // TODO: Test col_count and split_line
     // TODO: Modularize the splitter testing code
 
