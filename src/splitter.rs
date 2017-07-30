@@ -199,7 +199,7 @@ enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
 ///
 ///
 /// A conceptual cousin of PutBack<CharIndices>, which we used before, but more
-/// tightly optimized for our needs:
+/// tightly optimized for the needs of SplitLinesBySpace:
 ///
 /// - Input is ASCII-only (so, for example, 1 byte = 1 character)
 /// - We need characters all the time, but indices only infrequently
