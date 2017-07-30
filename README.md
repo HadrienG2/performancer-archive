@@ -1,4 +1,4 @@
-# Performance analysis interface to procfs
+# Performance analysis interface to procfs (and later sysfs)
 
 When measuring system and application performance on Linux, a lot can be learned
 just by reading or polling the contents of /proc. Unfortunately, doing so

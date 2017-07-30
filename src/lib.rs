@@ -1,4 +1,7 @@
-//! This library is a sampling interface to Linux' procfs (/proc)
+//! This library is a sampling interface to Linux' pseudo-filesystems
+//!
+//! It currently covers procfs (aka "/proc"), and may in the future also cover
+//! sysfs (aka "/sys") for selected purposes.
 //!
 //! Its main design goal is to allow taking periodical measurements of system
 //! activity, as described by the Linux kernel's procfs API, at a relatively
