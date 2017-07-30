@@ -17,6 +17,7 @@ extern crate testbench;
 
 pub mod proc;
 mod reader;
+mod splitter;
 
 
 /// Performance benchmarks
