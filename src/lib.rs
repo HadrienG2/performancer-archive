@@ -15,7 +15,7 @@ extern crate libc;
 extern crate regex;
 extern crate testbench;
 
-pub mod parsers;
+pub mod proc;
 
 use std::fs::File;
 use std::io::{Read, Result, Seek, SeekFrom};
