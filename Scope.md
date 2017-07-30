@@ -68,7 +68,7 @@ an API which is optimized for single-shot readout (as opposed to sampling).
 [ ] **/proc/diskstats:** Usage of block peripherals, including disk drives.
 [ ] **/proc/interrupts:** Hardware CPU interrupt counters.
 [ ] **/proc/locks:** POSIX file locks, may help nail down IO scalability issues.
-[ ] **/proc/meminfo:** Detailed RAM usage statistics.
+[X] **/proc/meminfo:** Detailed RAM usage statistics.
 [ ] **/proc/net:** Basically a symlink to /proc/self/net.
 [ ] **/proc/pagetypeinfo:** More detailed variant of /proc/buddyinfo.
 [ ] **/proc/schedstat:** Kernel scheduler usage statistics, see also
@@ -82,7 +82,7 @@ an API which is optimized for single-shot readout (as opposed to sampling).
 [ ] **/proc/timer_list:** Usage of timer interrupts.
 [X] **/proc/uptime:** Total time elapsed since system startup, and time spent
     idle (no process running).
-[ ] **/proc/version:** Kernel version string. Can be used to gracefully detect
+[X] **/proc/version:** Kernel version string. Can be used to gracefully detect
     kernel version incompatibilities.
 [ ] **/proc/vmstat:** Detailed virtual memory usage statistics.
 [ ] **/proc/zoneinfo:** More detailed memory usage statistics, with an eye
@@ -175,6 +175,7 @@ studies in order to justify the cost of implementing a parser & API for them.
 * **/proc/crypto:** List of crypto algorithms implemented in the kernel.
 * **/proc/dma:** List of ISA DMA channels. Generally obsolete.
 * **/proc/execdomains:** Various UNIX compatibility layers. Rarely used.
+* **/proc/fb:** List of active framebuffers.
 * **/proc/filesystems:** List of filesystems supported by the active kernel.
 * **/proc/i8k:** A small bunch of Dell-specific BIOS metadata.
 * **/proc/iomem:** Map of memory-mapped IO.
@@ -208,5 +209,23 @@ studies in order to justify the cost of implementing a parser & API for them.
 
 I should take a deeper look at these before taking a hard decision about them:
 
-* **/proc/<pid>/net:** There's a lot about network configuration going on in
-  there, I'll look into it once I'm done with the rest of `/proc/<pid>`.
+* **/proc/<pid>/net/:** This describes the network configuration, as seen by the
+  current process. I have started studying it, but do not yet have complete
+  coverage of it in the lists above.
+* **/proc/asound/:** This is some data about the ALSA sound infrastructure. It is
+  unclear at this point whether there is something useful in there for the
+  purpose of performance studies.
+* **/proc/bus/:** A detailed description of various hardware buses.
+* **/proc/config.gz:** The kernel configuration. Can be interesting, but is
+  somewhat hard to parse (due to gzip compression) and may not be available
+  depending on kernel configuration. Probably not a priority.
+* **/proc/devices:** A mapping between device names and numbers.
+* **/proc/fs/:** Various data about active filesystem drivers.
+* **/proc/irq/:** Various data about interrupt sources.
+* **/proc/misc:** A string-to-integer mapping of unclear purpose.
+* **/proc/partitions:** A description of the disk partitioning setup.
+* **/proc/scsi/:** Various data about SCSI devices.
+* **/proc/sys/:** Lots of unrelated things. Includes useful configuration for
+  interfacing perf.
+* **/proc/sysvipc/:** Statistics about the System V interprocess communication
+  mechanisms: pipes, shared memory regions, queues...
