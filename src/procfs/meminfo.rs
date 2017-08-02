@@ -1,8 +1,8 @@
 //! This module contains a sampling parser for /proc/meminfo
 
-use ::ProcFileReader;
+use ::reader::ProcFileReader;
+use ::splitter::SplitLinesBySpace;
 use bytesize::ByteSize;
-use parsers::SplitLinesBySpace;
 use std::collections::HashMap;
 use std::io::Result;
 
@@ -230,7 +230,7 @@ impl MemInfoRecord {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::parsers::split_line;
+    use ::splitter::split_line;
     use super::{ByteSize, MemInfoData, MemInfoRecord, MemInfoSampler};
 
     /// Check that meminfo record initialization works well
@@ -362,7 +362,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use ::ProcFileReader;
+    use ::reader::ProcFileReader;
     use super::MemInfoSampler;
     use testbench;
 
@@ -373,7 +373,7 @@ mod benchmarks {
         let mut reader =
             ProcFileReader::open("/proc/meminfo")
                            .expect("Failed to open memory info");
-        testbench::benchmark(400_000, || {
+        testbench::benchmark(500_000, || {
             reader.sample(|_| {}).expect("Failed to read memory info");
         });
     }
@@ -385,7 +385,7 @@ mod benchmarks {
         let mut stat =
             MemInfoSampler::new()
                            .expect("Failed to create a memory info sampler");
-        testbench::benchmark(400_000, || {
+        testbench::benchmark(500_000, || {
             stat.sample().expect("Failed to sample memory info");
         });
     }

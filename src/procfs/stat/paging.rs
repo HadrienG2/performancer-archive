@@ -1,7 +1,7 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the paging statistics of /proc/stat (page and swap).
 
-use parsers::SplitLinesBySpace;
+use splitter::SplitLinesBySpace;
 use super::StatDataStore;
 
 
@@ -54,7 +54,7 @@ impl StatDataStore for PagingStatData {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::parsers::split_line;
+    use ::splitter::split_line;
     use super::{PagingStatData, StatDataStore};
 
     /// Check that paging statistics initialization works as expected

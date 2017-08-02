@@ -1,108 +1,52 @@
-//! This module contains sampling parsers for the contents of procfs.
+//! A mechanism for splitting the content of pseudo-files by newlines and spaces
 //!
-//! These parsers are designed to allow sampling the contents of /proc files at
-//! a rapid rate, for the purpose of acquiring, analyzing and displaying useful
-//! statistics on the time evolution of system performance.
+//! The metadata provided by procfs pseudo-files often has a two-dimensional
+//! inner structure. Lines of text represent different devices or categories of
+//! information, whereas space-separated columns are used to separate the
+//! details of a single line (e.g. idle CPU time vs user-mode CPU time).
 //!
-//! Each submodule corresponds to one file in /proc, and is named as close to
-//! that file as allowed by the Rust module system. The various modules are
-//! intended to work in the same way, and we will later explore avenues for
-//! enforcing this interface contract and reducing code duplication through
-//! code generation mechanisms.
+//! Rust provides ways of dealing with this hierarchy (namely SplitWhitespace
+//! and Lines), but these primitives are not fast enough for our demanding
+//! application in practice. This deficiency can be attributed to the fact that
+//! a naive version of a line- and space- splitter based on standard Rust
+//! iterators does many things which we do not need:
 //!
-//! The top-level module currently contains utilities which are potentially
-//! usable by multiple modules. If this shared utility library grows, it will be
-//! extracted to a dedicated "detail" submodule.
-
-pub mod meminfo;
-pub mod stat;
-pub mod uptime;
-pub mod version;
+//! - It iterates through each line twice, once to determine its boundaries and
+//!   another time to separate its columns. This work can be carried out in a
+//!   single pass through the text, at the cost of more code complexity.
+//! - It treats "characters" in a Unicode-aware fashion, accounting for things
+//!   like multiple whitespace characters, whereas we know that the Linux kernel
+//!   will only send us ASCII text and only separate it by newlines and spaces.
+//!
+//! We thus provide a mechanism for separating the lines and space-separated
+//! columns of ASCII pseudo-files, achieving much better performance than
+//! regular Rust iterators in this scenario.
 
 use std::ascii::AsciiExt;
-use std::time::Duration;
 
 
-/// Specialized parser for Durations expressed in fractional seconds, using the
-/// usual text format XXXX[.[YY]]. This is about parsing standardized data, so
-/// the input is assumed to be correct, and errors will be handled via panics.
-fn parse_duration_secs(input: &str) -> Duration {
-    // Separate the integral part from the fractional part (if any)
-    let mut integer_iter = input.split('.');
-
-    // Parse the number of whole seconds
-    let seconds
-        = integer_iter.next().expect("Input string should not be empty")
-                      .parse::<u64>().expect("Input should parse as seconds");
-
-    // Parse the number of extra nanoseconds, if any
-    let nanoseconds = match integer_iter.next() {
-        // No decimals means no nanoseconds. Allow for a trailing decimal point.
-        Some("") | None    => 0,
-
-        // If there is something after the ., assume it is decimals. Sub nano-
-        // second decimals will be truncated: Rust only understands nanosecs.
-        Some(mut decimals) => {
-            debug_assert!(decimals.chars().all(|c| c.is_digit(10)),
-                          "Only digits are expected after the decimal point");
-            if decimals.len() > 9 { decimals = &decimals[0..9]; }
-            let nanosecs_multiplier = 10u32.pow(9 - (decimals.len() as u32));
-            let decimals_int =
-                decimals.parse::<u32>()
-                        .expect("Failed to parse the fractional seconds");
-            decimals_int * nanosecs_multiplier
-        }
-    };
-
-    // At this point, we should be at the end of the string
-    debug_assert_eq!(integer_iter.next(), None,
-                     "Unexpected input found at end of the duration string");
-
-    // Return the Duration that we just parsed
-    Duration::new(seconds, nanoseconds)
-}
-
-
-// An "iterator" operating over **both** lines of text and space-separated words
-//
-// Files in procfs often attribute different semantics to spaces and line feeds.
-// Line feeds are used to separate high-level metadata (e.g. CPU vs RAM) whereas
-// spaces are used to separate different details of one piece of metadata (e.g.
-// different kinds of CPU/RAM consumption).
-//
-// This means that in order to parse a procfs file, one needs to iterate at two
-// hierarchical levels: at the level of lines of text, and at the level of
-// space-separated "words" within a line of text.
-//
-// This can be done by combining Lines and SplitWhitespace (or optimized
-// versions thereof), however each line of text must then be parsed twice: first
-// by Lines in order to extract a line of text, and again by SplitWhitespace in
-// order to separate the words inside of the line of text.
-//
-// In principle, however, both of those separations could be carried out in a
-// single pass through the text by taking different actions on spaces and line
-// feeds, and producing both end-of-word and end-of-line signals.
-//
-// The Rust Iterator API does not offer any guarantee about whether calling
-// next() on an iterator which returned None continues to return None. This
-// iterator exploits that undefined behaviour by defining a variant of
-// SplitWhitespace which outputs None whenever a newline character is reached,
-// effectively implementing some (admittedly crude) line splitting without
-// needing to parse each line of the input twice.
-//
-// Expected usage is to call next_line() on every line, continue iterating over
-// lines as long as this function returns true, and for each line use
-// SplitLinesBySpace as a regular iterator over space-separated words.
-//
-pub struct SplitLinesBySpace<'a> {
-    /// String which we are trying to split
+/// Mechanism for splitting the elements of newlines- and space-separated text
+///
+/// To use this pseudo-file splitter, proceed as follows:
+///
+/// - Initialize it on an input string with new()
+/// - To iterate over lines, call next_line() as long as it returns true
+/// - To iterate over columns, use this as a normal (**non-fused**) iterator
+///
+/// Note that since the iterator is reused after each line, you cannot consume
+/// it using methods like count(). Since counting columns is often useful when
+/// initializing a parser, we provide a helper col_count() method which consumes
+/// the file columns until the next line and returns their count.
+///
+pub(crate) struct SplitLinesBySpace<'a> {
+    /// Reference to the sring which we are trying to split
     target: &'a str,
 
     /// Iterator over the characters and their byte indices
     char_iter: FastCharIndices<'a>,
 
-    /// Where we are within the input (at the beginning of a line, somewhere
-    /// inside a line, or at the end of the input string)
+    /// Small state machine tracking our input location (beginning or middle
+    /// of a line, end of the input string...)
     status: LineSpaceSplitterStatus,
 }
 //
@@ -164,9 +108,9 @@ impl<'a> SplitLinesBySpace<'a> {
         }
     }
 
-    /// Consume the current line, indicating how many space-separated words were
-    /// encountered, but without consuming the entire iterator.
-    pub fn word_count(&mut self) -> usize {
+    /// Consume the current line, indicating how many space-separated columns
+    /// were encountered, but without consuming the entire iterator.
+    pub fn col_count(&mut self) -> usize {
         let mut word_count = 0usize;
         while self.next().is_some() {
             word_count += 1;
@@ -175,13 +119,14 @@ impl<'a> SplitLinesBySpace<'a> {
     }
 }
 //
+// Column iteration is handled using the standard Rust iterator interface.
 impl<'a> Iterator for SplitLinesBySpace<'a> {
     /// We're outputting strings
     type Item = &'a str;
 
-    /// This is how one iterates through space-separated words until a newline
+    /// This is how one iterates through space-separated columns until a newline
     fn next(&mut self) -> Option<Self::Item> {
-        // We expect the caller to have properly called next_line() beforehand
+        // The caller should have properly called next_line() beforehand
         assert_eq!(self.status, LineSpaceSplitterStatus::InsideLine);
 
         // Find the first non-space character before the end of line (if any):
@@ -231,7 +176,7 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
                 },
 
                 // Newlines also terminate words, but we must put them back in
-                // because we want to subsequently signal them as a None.
+                // because we also want to subsequently signal them with a None.
                 Some('\n') => {
                     let last_idx = self.char_iter.prev_index();
                     self.char_iter.back();
@@ -248,14 +193,17 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
     }
 }
 ///
-/// State machine used by SplitLinesBySpace for iterating over lines
+/// State machine used by SplitLinesBySpace when iterating over lines
 #[derive(Debug, PartialEq)]
 enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
 ///
 ///
-/// A conceptual cousin of PutBack<CharIndices>, heavily optimized for our needs
-/// of ASCII-only parsing, frequent character lookup with infrequent index
-/// lookup, and occasional backtracking on a character.
+/// A conceptual cousin of PutBack<CharIndices>, which we used before, but more
+/// tightly optimized for the needs of SplitLinesBySpace:
+///
+/// - Input is ASCII-only (so, for example, 1 byte = 1 character)
+/// - We need characters all the time, but indices only infrequently
+/// - We may rarely backtrack on one specific character ('\n')
 ///
 struct FastCharIndices<'a> {
     /// Byte-wise view of the original ASCII string
@@ -288,17 +236,18 @@ impl<'a> FastCharIndices<'a> {
         self.next_char_index - 1
     }
 
-    /// Go back to the previous character, reversing the action of next()
+    /// Go back to the previous character, reverting the action of next()
     #[inline]
     fn back(&mut self) {
         self.next_char_index -= 1;
     }
 }
 ///
-/// Iterate over characters (use index() to know about the character's index)
 impl<'a> Iterator for FastCharIndices<'a> {
+    /// We implement the iterator interface for character iteration
     type Item = char;
 
+    /// This is how we iterate through ASCII characters
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         // Get the current character, if any
@@ -313,13 +262,12 @@ impl<'a> Iterator for FastCharIndices<'a> {
         result
     }
 }
-///
-///
+
+
 /// Testing code often needs to split a single line of text, even though the
 /// Real Thing needs to operate over multiple lines of text. We got you covered.
-///
-#[allow(dead_code)]
-fn split_line(input: &str) -> SplitLinesBySpace {
+#[cfg(test)]
+pub(crate) fn split_line(input: &str) -> SplitLinesBySpace {
     let mut line_splitter = SplitLinesBySpace::new(input);
     assert!(line_splitter.next_line());
     line_splitter
@@ -329,32 +277,69 @@ fn split_line(input: &str) -> SplitLinesBySpace {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::SplitLinesBySpace;
-    use std::time::Duration;
+    use super::{FastCharIndices, SplitLinesBySpace};
 
-    /// Check that our Duration parser works as expected
+    // Check that FastCharIndices handles empty strings correctly
     #[test]
-    fn parse_duration() {
-        // Plain seconds
-        assert_eq!(super::parse_duration_secs("42"),
-                   Duration::new(42, 0));
-
-        // Trailing decimal point
-        assert_eq!(super::parse_duration_secs("3."),
-                   Duration::new(3, 0));
-
-        // Some amounts of fractional seconds, down to nanosecond precision
-        assert_eq!(super::parse_duration_secs("4.2"),
-                   Duration::new(4, 200_000_000));
-        assert_eq!(super::parse_duration_secs("5.34"),
-                   Duration::new(5, 340_000_000));
-        assert_eq!(super::parse_duration_secs("6.567891234"),
-                   Duration::new(6, 567_891_234));
-
-        // Sub-nanosecond precision is truncated
-        assert_eq!(super::parse_duration_secs("7.8901234567"),
-                   Duration::new(7, 890_123_456));
+    fn empty_char_indices() {
+        let mut empty_iter = FastCharIndices::new("");
+        assert!(empty_iter.is_empty());
+        assert_eq!(empty_iter.next(), None);
     }
+
+    // Check that FastCharIndices works well on a single-char string
+    #[test]
+    fn single_char_indices() {
+        // Initial state
+        let mut single_char_iter = FastCharIndices::new("@");
+        assert!(!single_char_iter.is_empty());
+
+        // Iterating through the character
+        assert_eq!(single_char_iter.next(), Some('@'));
+        assert!(single_char_iter.is_empty());
+        assert_eq!(single_char_iter.prev_index(), 0);
+
+        // Going back and starting over
+        single_char_iter.back();
+        assert!(!single_char_iter.is_empty());
+        assert_eq!(single_char_iter.next(), Some('@'));
+        assert!(single_char_iter.is_empty());
+        assert_eq!(single_char_iter.prev_index(), 0);
+
+        // Checking that we do get a None at the end
+        assert_eq!(single_char_iter.next(), None);
+    }
+
+    // Check that FastCharIndices also works well on a two-char string
+    #[test]
+    fn two_char_indices() {
+        // Initial state
+        let mut dual_char_iter = FastCharIndices::new("42");
+        assert!(!dual_char_iter.is_empty());
+
+        // Iterating through the first character
+        assert_eq!(dual_char_iter.next(), Some('4'));
+        assert!(!dual_char_iter.is_empty());
+        assert_eq!(dual_char_iter.prev_index(), 0);
+
+        // Iterating through the second character
+        assert_eq!(dual_char_iter.next(), Some('2'));
+        assert!(dual_char_iter.is_empty());
+        assert_eq!(dual_char_iter.prev_index(), 1);
+
+        // Going back and starting over
+        dual_char_iter.back();
+        assert!(!dual_char_iter.is_empty());
+        assert_eq!(dual_char_iter.next(), Some('2'));
+        assert!(dual_char_iter.is_empty());
+        assert_eq!(dual_char_iter.prev_index(), 1);
+
+        // Checking that we do get a None at the end
+        assert_eq!(dual_char_iter.next(), None);
+    }
+
+    // TODO: Modularize the splitter testing code
+    // TODO: Test col_count and split_line
 
     /// Check that SplitLinesBySpace works as intended, both when skipping
     /// through lines and when exhaustively iterating through their words.

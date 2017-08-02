@@ -1,6 +1,7 @@
 //! This module contains a sampling parser for /proc/uptime
 
-use ::{parsers, ProcFileReader};
+use ::procfs;
+use ::reader::ProcFileReader;
 use std::io::Result;
 use std::time::Duration;
 
@@ -59,12 +60,12 @@ impl UptimeData {
         // Load machine uptime and idle time
         let mut numbers_iter = file_contents.split_whitespace();
         self.wall_clock_uptime.push(
-            parsers::parse_duration_secs(
+            procfs::parse_duration_secs(
                 numbers_iter.next().expect("Machine uptime is missing")
             )
         );
         self.cpu_idle_time.push(
-            parsers::parse_duration_secs(
+            procfs::parse_duration_secs(
                 numbers_iter.next().expect("Machine idle time is missing")
             )
         );
@@ -154,7 +155,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use ::ProcFileReader;
+    use ::reader::ProcFileReader;
     use super::UptimeSampler;
     use testbench;
 

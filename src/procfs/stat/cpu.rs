@@ -1,7 +1,7 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the "cpu" sections of /proc/stat.
 
-use ::parsers::SplitLinesBySpace;
+use ::splitter::SplitLinesBySpace;
 use libc;
 use std::time::Duration;
 use super::StatDataStore;
@@ -164,7 +164,7 @@ lazy_static! {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::parsers::split_line;
+    use ::splitter::split_line;
     use std::time::Duration;
     use super::{CPUStatData, StatDataStore, TICKS_PER_SEC};
 
