@@ -4,9 +4,9 @@ mod cpu;
 mod interrupt;
 mod paging;
 
-use ::ProcFileReader;
+use ::reader::ProcFileReader;
+use ::splitter::SplitLinesBySpace;
 use chrono::{DateTime, TimeZone, Utc};
-use parsers::SplitLinesBySpace;
 use self::cpu::CPUStatData;
 use self::interrupt::InterruptStatData;
 use self::paging::PagingStatData;

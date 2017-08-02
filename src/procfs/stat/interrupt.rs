@@ -1,7 +1,7 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the IRQ statistics of /proc/stat (intr and softirq).
 
-use parsers::SplitLinesBySpace;
+use ::splitter::SplitLinesBySpace;
 use super::StatDataStore;
 
 

@@ -1,8 +1,8 @@
 //! This module contains a sampling parser for /proc/meminfo
 
-use ::ProcFileReader;
+use ::reader::ProcFileReader;
+use ::splitter::SplitLinesBySpace;
 use bytesize::ByteSize;
-use parsers::SplitLinesBySpace;
 use std::collections::HashMap;
 use std::io::Result;
 
