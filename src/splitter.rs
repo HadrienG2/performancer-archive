@@ -286,7 +286,7 @@ pub(crate) fn split_line(input: &str) -> SplitLinesBySpace {
 mod tests {
     use super::{FastCharIndices, SplitLinesBySpace};
 
-    // Check that FastCharIndices handles empty strings correctly
+    /// Check that FastCharIndices handles empty strings correctly
     #[test]
     fn empty_char_indices() {
         let mut empty_iter = FastCharIndices::new("");
@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(empty_iter.next(), None);
     }
 
-    // Check that FastCharIndices works well on a single-char string
+    /// Check that FastCharIndices works well on a single-char string
     #[test]
     fn single_char_indices() {
         // Initial state
@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(single_char_iter.next(), None);
     }
 
-    // Check that FastCharIndices also works well on a two-char string
+    /// Check that FastCharIndices also works well on a two-char string
     #[test]
     fn two_char_indices() {
         // Initial state
@@ -345,101 +345,81 @@ mod tests {
         assert_eq!(dual_char_iter.next(), None);
     }
 
-    // TODO: Modularize the splitter testing code
-    // TODO: Test col_count and split_line
-
-    /// Check that SplitLinesBySpace works as intended, both when skipping
-    /// through lines and when exhaustively iterating through their words.
+    /// Test that SplitLinesBySpace works as expected
     #[test]
     fn split_lines_by_space() {
-        // Split the empty string
-        let mut split_empty = SplitLinesBySpace::new("");
-        assert_eq!(split_empty.next_line(), false);
+        // The empty string is alone in being considered as zero lines long
+        test_splitter("",       &[]);
 
-        // Split a string full of space
-        let mut split_space = SplitLinesBySpace::new(" ");
-        assert_eq!(split_space.next_line(), true);
-        assert_eq!(split_space.next_line(), false);
-        split_space = SplitLinesBySpace::new(" ");
-        assert_eq!(split_space.next_line(), true);
-        assert_eq!(split_space.next(), None);
-        assert_eq!(split_space.next_line(), false);
+        // All recognized character classes, taken in isolation
+        test_splitter("\n",     &[&[]]);
+        test_splitter(" ",      &[&[]]);
+        test_splitter("a",      &[&[&"a"]]);
 
-        // Split a newline
-        let mut split_newline = SplitLinesBySpace::new("\n");
-        assert_eq!(split_newline.next_line(), true);
-        assert_eq!(split_newline.next_line(), false);
-        split_newline = SplitLinesBySpace::new("\n");
-        assert_eq!(split_newline.next_line(), true);
-        assert_eq!(split_newline.next(), None);
-        assert_eq!(split_newline.next_line(), false);
+        // All ordered combinations of two character classes
+        test_splitter("\n\n",   &[&[],          &[]]);
+        test_splitter("\n ",    &[&[],          &[]]);
+        test_splitter("\nb",    &[&[],          &[&"b"]]);
+        test_splitter(" \n",    &[&[]]);
+        test_splitter("  ",     &[&[]]);
+        test_splitter(" c",     &[&[&"c"]]);
+        test_splitter("d\n",    &[&[&"d"]]);
+        test_splitter("e ",     &[&[&"e"]]);
+        test_splitter("fg",     &[&[&"fg"]]);
 
-        // Split a single word
-        let mut split_word = SplitLinesBySpace::new("42");
-        assert_eq!(split_word.next_line(), true);
-        assert_eq!(split_word.next_line(), false);
-        split_word = SplitLinesBySpace::new("42");
-        assert_eq!(split_word.next_line(), true);
-        assert_eq!(split_word.next(), Some("42"));
-        assert_eq!(split_word.next(), None);
-        assert_eq!(split_word.next_line(), false);
+        // At this stage, we have tested...
+        //  - Empty text, non-empty text with empty and non-empty lines
+        //  - Words at the beginning of a line, after a space, after a line feed
+        //  - Words terminated by a space, a line feed, and the end of input
+        //  - Words of one character and of more than one character
+        //
+        // This dataset thus provides coverage of...
+        //  - All the states of the initial loop of next()
+        //  - All the states of its final loop
+        //  - All states of the inner loop of next_line(), via test_splitter
+        //
+        // The coverage thus seems good enough at this point
+    }
 
-        // Split a word preceded by spaces
-        let mut split_space_word = SplitLinesBySpace::new("  24");
-        assert_eq!(split_space_word.next_line(), true);
-        assert_eq!(split_space_word.next_line(), false);
-        split_space_word = SplitLinesBySpace::new("  24");
-        assert_eq!(split_space_word.next_line(), true);
-        assert_eq!(split_space_word.next(), Some("24"));
-        assert_eq!(split_space_word.next(), None);
-        assert_eq!(split_space_word.next_line(), false);
+    // TODO: Test split_line
 
-        // Split a word preceded by a newline
-        let mut split_newline_word = SplitLinesBySpace::new("\nabc123");
-        assert_eq!(split_newline_word.next_line(), true);
-        assert_eq!(split_newline_word.next_line(), true);
-        assert_eq!(split_newline_word.next_line(), false);
-        split_newline_word = SplitLinesBySpace::new("\nabc123");
-        assert_eq!(split_newline_word.next_line(), true);
-        assert_eq!(split_newline_word.next(), None);
-        assert_eq!(split_newline_word.next_line(), true);
-        assert_eq!(split_newline_word.next(), Some("abc123"));
-        assert_eq!(split_newline_word.next(), None);
-        assert_eq!(split_newline_word.next_line(), false);
+    /// INTERNAL: Given a string and its decomposition into lines and space-
+    ///           separated columns, check if SplitLinesBySpace works on it.
+    fn test_splitter(string: &str, decomposition: &[&[&str]]) {
+        // Start by skipping through the lines
+        let mut splitter = SplitLinesBySpace::new(string);
+        for _ in decomposition.iter() {
+            assert!(splitter.next_line());
+        }
+        assert!(!splitter.next_line());
 
-        // Split a word followed by spaces
-        let mut split_word_space = SplitLinesBySpace::new("viwb ");
-        assert_eq!(split_word_space.next_line(), true);
-        assert_eq!(split_word_space.next_line(), false);
-        split_word_space = SplitLinesBySpace::new("viwb ");
-        assert_eq!(split_word_space.next_line(), true);
-        assert_eq!(split_word_space.next(), Some("viwb"));
-        assert_eq!(split_word_space.next(), None);
-        assert_eq!(split_word_space.next_line(), false);
+        // Then count the columns of each line
+        splitter = SplitLinesBySpace::new(string);
+        for line in decomposition.iter() {
+            assert!(splitter.next_line());
+            assert_eq!(splitter.col_count(), line.len());
+        }
+        assert!(!splitter.next_line());
 
-        // Split a word followed by a newline
-        let mut split_word_newline = SplitLinesBySpace::new("g1s13\n");
-        assert_eq!(split_word_newline.next_line(), true);
-        assert_eq!(split_word_newline.next_line(), false);
-        split_word_newline = SplitLinesBySpace::new("g1s13\n");
-        assert_eq!(split_word_newline.next_line(), true);
-        assert_eq!(split_word_newline.next(), Some("g1s13"));
-        assert_eq!(split_word_newline.next(), None);
-        assert_eq!(split_word_newline.next_line(), false);
+        // Check that reading one column and skipping through the rest works
+        splitter = SplitLinesBySpace::new(string);
+        for line in decomposition.iter() {
+            assert!(splitter.next_line());
+            if line.len() >= 1 {
+                assert_eq!(splitter.next(), Some(line[0]));
+            }
+        }
+        assert!(!splitter.next_line());
 
-        // Split three words with spaces and newlines
-        let mut split_everything = SplitLinesBySpace::new("  s( e \n o,p");
-        assert_eq!(split_everything.next_line(), true);
-        assert_eq!(split_everything.next_line(), true);
-        assert_eq!(split_everything.next_line(), false);
-        split_everything = SplitLinesBySpace::new("  s( e \n o,p");
-        assert_eq!(split_everything.next_line(), true);
-        assert_eq!(split_everything.next(), Some("s("));
-        assert_eq!(split_everything.next(), Some("e"));
-        assert_eq!(split_everything.next(), None);
-        assert_eq!(split_everything.next_line(), true);
-        assert_eq!(split_everything.next(), Some("o,p"));
-        assert_eq!(split_everything.next(), None);
-        assert_eq!(split_everything.next_line(), false);
+        // And finish with full column iteration
+        let mut splitter = SplitLinesBySpace::new(string);
+        for line in decomposition.iter() {
+            assert!(splitter.next_line());
+            for column in line.iter() {
+                assert_eq!(splitter.next(), Some(*column));
+            }
+            assert_eq!(splitter.next(), None);
+        }
+        assert!(!splitter.next_line());
     }
 }
