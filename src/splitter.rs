@@ -378,9 +378,21 @@ mod tests {
         //  - All the states of its final loop
         //  - All states of the inner loop of next_line(), via test_splitter
         //
-        // The coverage thus seems good enough at this point
+        // What we do not test so well, however, is whether the iterator's state
+        // remains consistent at word boundaries. Hence this last test.
+        test_splitter("This. Is\nSPARTA", &[&[&"This.", &"Is"], &[&"SPARTA"]]);
     }
 
+    // Test that split_line behaves as expected:
+    #[test]
+    fn split_line() {
+        let mut splitter = super::split_line("The answer is 42");
+        assert_eq!(splitter.next(), Some("The"));
+        assert_eq!(splitter.next(), Some("answer"));
+        assert_eq!(splitter.next(), Some("is"));
+        assert_eq!(splitter.next(), Some("42"));
+        assert_eq!(splitter.next(), None);
+    }
     // TODO: Test split_line
 
     /// INTERNAL: Given a string and its decomposition into lines and space-
