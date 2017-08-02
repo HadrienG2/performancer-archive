@@ -123,7 +123,7 @@ impl MemInfoData {
 
     /// Tell how many samples are present in the data store, and in debug mode
     /// check for internal data store consistency
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn len(&self) -> usize {
         // We'll return the length of the first record, if any, or else zero
         let length = self.records.first().map_or(0, |rec| rec.len());
@@ -216,7 +216,7 @@ impl MemInfoRecord {
     }
 
     /// Tell how many samples are present in the data store
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn len(&self) -> usize {
         match *self {
             MemInfoRecord::DataVolume(ref v)  => v.len(),

@@ -46,7 +46,7 @@ impl StatDataStore for InterruptStatData {
     }
 
     // Tell how many samples are present in the data store
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn len(&self) -> usize {
         let length = self.total.len();
         debug_assert!(self.details.iter().all(|vec| vec.len() == length));
@@ -102,6 +102,7 @@ impl InterruptCounts {
     }
 
     /// Tell how many interrupt counts we have recorded so far
+    #[cfg(test)]
     fn len(&self) -> usize {
         match *self {
             InterruptCounts::Zeroes(zero_count) => zero_count,

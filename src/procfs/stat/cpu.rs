@@ -126,7 +126,7 @@ impl StatDataStore for CPUStatData {
     }
 
     /// Tell how many samples are present in the data store
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn len(&self) -> usize {
         // Check the mandatory CPU timers
         let length = self.user_time.len();

@@ -42,7 +42,7 @@ impl StatDataStore for PagingStatData {
     }
 
     /// Tell how many samples are present in the data store
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn len(&self) -> usize {
         let length = self.incoming.len();
         debug_assert_eq!(length, self.outgoing.len());

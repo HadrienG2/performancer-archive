@@ -300,7 +300,7 @@ impl StatData {
 
     /// Tell how many samples are present in the data store, and in debug mode
     /// check for internal data store consistency
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn len(&self) -> usize {
         let mut opt_len = None;
         Self::update_len(&mut opt_len, &self.all_cpus);
@@ -335,6 +335,7 @@ impl StatData {
 
     /// INTERNAL: Update our prior knowledge of the amount of stored samples
     ///           (current_len) according to an optional data source.
+    #[cfg(test)]
     fn update_len<T>(current_len: &mut Option<usize>, opt_store: &Option<T>)
         where T: StatDataStore
     {
@@ -388,6 +389,7 @@ trait StatDataStore {
     fn push(&mut self, splitter: &mut SplitLinesBySpace);
 
     /// Number of data samples that were recorded so far
+    #[cfg(test)]
     fn len(&self) -> usize;
 }
 
@@ -404,6 +406,7 @@ impl<T, U> StatDataStore for Vec<T>
                       "No other statistical data should be present");
     }
 
+    #[cfg(test)]
     fn len(&self) -> usize {
         <Vec<T>>::len(self)
     }
