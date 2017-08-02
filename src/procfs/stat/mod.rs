@@ -141,7 +141,7 @@ impl StatData {
             match splitter.next().expect("Unexpected empty line") {
                 // Statistics on all CPUs (should come first)
                 "cpu" => {
-                    num_cpu_timers = splitter.word_count() as u8;
+                    num_cpu_timers = splitter.col_count() as u8;
                     data.all_cpus = Some(CPUStatData::new(num_cpu_timers));
                     data.line_target.push(StatDataMember::AllCPUs);
                 }
@@ -149,7 +149,7 @@ impl StatData {
                 // Statistics on a specific CPU thread (should be consistent
                 // with the global stats and come after them)
                 header if &header[0..3] == "cpu" => {
-                    assert_eq!(splitter.word_count() as u8, num_cpu_timers,
+                    assert_eq!(splitter.col_count() as u8, num_cpu_timers,
                                "Inconsistent amount of CPU timers");
                     data.each_cpu.push(CPUStatData::new(num_cpu_timers));
                     data.line_target.push(StatDataMember::EachCPU);
@@ -169,7 +169,7 @@ impl StatData {
 
                 // Hardware interrupt statistics
                 "intr" => {
-                    let num_interrupts = (splitter.word_count() - 1) as u16;
+                    let num_interrupts = (splitter.col_count() - 1) as u16;
                     data.interrupts = Some(
                         InterruptStatData::new(num_interrupts)
                     );
@@ -218,7 +218,7 @@ impl StatData {
 
                 // Softirq statistics
                 "softirq" => {
-                    let num_interrupts = (splitter.word_count() - 1) as u16;
+                    let num_interrupts = (splitter.col_count() - 1) as u16;
                     data.softirqs = Some(
                         InterruptStatData::new(num_interrupts)
                     );
