@@ -38,7 +38,7 @@ use std::ascii::AsciiExt;
 /// initializing a parser, we provide a helper col_count() method which consumes
 /// the file columns until the next line and returns their count.
 ///
-struct SplitLinesBySpace<'a> {
+pub(crate) struct SplitLinesBySpace<'a> {
     /// Reference to the sring which we are trying to split
     target: &'a str,
 

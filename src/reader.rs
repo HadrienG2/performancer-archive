@@ -29,7 +29,7 @@ use std::path::Path;
 /// definite statement about this until I have really taken the time to study
 /// sysfs and check that the above assumptions still hold.
 ///
-struct ProcFileReader {
+pub(crate) struct ProcFileReader {
     /// Persistent handle to the file being sampled
     file_handle: File,
 
