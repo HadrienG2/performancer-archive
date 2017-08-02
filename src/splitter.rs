@@ -281,7 +281,7 @@ mod tests {
 
     // Check that FastCharIndices handles empty strings correctly
     #[test]
-    fn empty_char_indices {
+    fn empty_char_indices() {
         let mut empty_iter = FastCharIndices::new("");
         assert!(empty_iter.is_empty());
         assert_eq!(empty_iter.next(), None);
@@ -289,7 +289,7 @@ mod tests {
 
     // Check that FastCharIndices works well on a single-char string
     #[test]
-    fn single_char_indices {
+    fn single_char_indices() {
         // Initial state
         let mut single_char_iter = FastCharIndices::new("@");
         assert!(!single_char_iter.is_empty());
@@ -312,7 +312,7 @@ mod tests {
 
     // Check that FastCharIndices also works well on a two-char string
     #[test]
-    fn two_char_indices {
+    fn two_char_indices() {
         // Initial state
         let mut dual_char_iter = FastCharIndices::new("42");
         assert!(!dual_char_iter.is_empty());
@@ -338,8 +338,8 @@ mod tests {
         assert_eq!(dual_char_iter.next(), None);
     }
 
-    // TODO: Test col_count and split_line
     // TODO: Modularize the splitter testing code
+    // TODO: Test col_count and split_line
 
     /// Check that SplitLinesBySpace works as intended, both when skipping
     /// through lines and when exhaustively iterating through their words.
