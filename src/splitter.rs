@@ -163,10 +163,11 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
             }
         }
 
-        // We are now inside of a word, and looking for its end. From now on,
-        // we need to be more careful: if the word completes at the end of the
-        // current line, we will need to output two things in a row, first the
-        // word, then a None. We handle that by peeking instead of iterating.
+        // We are now inside of a word, and looking for its end. There is one
+        // special scenario to take care of: if the word completes at the end
+        // of the current line, we will need to output two things in a row,
+        // first the word, then a None to signal the line ending. We handle that
+        // using the backtracking ability of FastCharIndices.
         loop {
             match self.char_iter.next() {
                 // We reached the end of a word: output said word.
@@ -186,7 +187,8 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
                 // We are still in the middle of the word: move on
                 Some(_) => continue,
 
-                // We reached the end of the input: output the last word
+                // We reached the end of the input: output the last word. We do
+                // not need to backtrack since the character iterator is fused.
                 None => return Some(&self.target[first_idx..]),
             }
         }
@@ -204,6 +206,9 @@ enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
 /// - Input is ASCII-only (so, for example, 1 byte = 1 character)
 /// - We need characters all the time, but indices only infrequently
 /// - We may rarely backtrack on one specific character ('\n')
+///
+/// This iterator is fused: it will continue to output None indefinitely after
+/// the end. We will later signal this via the FusedIterator marker trait.
 ///
 struct FastCharIndices<'a> {
     /// Byte-wise view of the original ASCII string
@@ -262,6 +267,8 @@ impl<'a> Iterator for FastCharIndices<'a> {
         result
     }
 }
+//
+// TODO: Implement FusedIterator once it is stable
 
 
 /// Testing code often needs to split a single line of text, even though the
