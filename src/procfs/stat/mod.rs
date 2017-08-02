@@ -413,7 +413,7 @@ impl<T, U> StatDataStore for Vec<T>
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::parsers::split_line;
+    use ::splitter::split_line;
     use chrono::{TimeZone, Utc};
     use super::{CPUStatData, InterruptStatData, PagingStatData, StatData,
                 StatDataMember, StatDataStore, StatSampler};
@@ -625,7 +625,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use ::ProcFileReader;
+    use ::reader::ProcFileReader;
     use super::StatSampler;
     use testbench;
 

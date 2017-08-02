@@ -114,7 +114,7 @@ impl InterruptCounts {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::parsers::split_line;
+    use ::splitter::split_line;
     use super::{InterruptCounts, InterruptStatData, StatDataStore};
 
     /// Check that initializing an interrupt count sampler works as expected

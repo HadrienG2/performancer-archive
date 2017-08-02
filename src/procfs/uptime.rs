@@ -155,7 +155,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use ::ProcFileReader;
+    use ::reader::ProcFileReader;
     use super::UptimeSampler;
     use testbench;
 

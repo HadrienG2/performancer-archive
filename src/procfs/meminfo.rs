@@ -230,7 +230,7 @@ impl MemInfoRecord {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::parsers::split_line;
+    use ::splitter::split_line;
     use super::{ByteSize, MemInfoData, MemInfoRecord, MemInfoSampler};
 
     /// Check that meminfo record initialization works well
@@ -362,7 +362,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use ::ProcFileReader;
+    use ::reader::ProcFileReader;
     use super::MemInfoSampler;
     use testbench;
 

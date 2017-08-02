@@ -54,7 +54,7 @@ impl StatDataStore for PagingStatData {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::parsers::split_line;
+    use ::splitter::split_line;
     use super::{PagingStatData, StatDataStore};
 
     /// Check that paging statistics initialization works as expected

@@ -267,7 +267,7 @@ impl<'a> Iterator for FastCharIndices<'a> {
 /// Testing code often needs to split a single line of text, even though the
 /// Real Thing needs to operate over multiple lines of text. We got you covered.
 #[cfg(test)]
-fn split_line(input: &str) -> SplitLinesBySpace {
+pub(crate) fn split_line(input: &str) -> SplitLinesBySpace {
     let mut line_splitter = SplitLinesBySpace::new(input);
     assert!(line_splitter.next_line());
     line_splitter
@@ -277,7 +277,7 @@ fn split_line(input: &str) -> SplitLinesBySpace {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::SplitLinesBySpace;
+    use super::{FastCharIndices, SplitLinesBySpace};
 
     // Check that FastCharIndices handles empty strings correctly
     #[test]
