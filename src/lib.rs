@@ -15,7 +15,7 @@ extern crate libc;
 extern crate regex;
 extern crate testbench;
 
-pub mod proc;
+pub mod procfs;
 mod reader;
 mod splitter;
 
