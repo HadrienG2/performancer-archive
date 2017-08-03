@@ -246,50 +246,72 @@ impl StatData {
         // This time, we know how lines of /proc/stat map to our members
         let mut splitter = SplitLinesBySpace::new(file_contents);
         for target in self.line_target.iter() {
-            // The beginning of parsing is the same as before: split by spaces.
-            // But this time, we discard the header, as we already know it.
+            // The beginning of parsing is the same as before: split by spaces
+            // and extract the header of each line.
             assert!(splitter.next_line(), "A stat record has disappeared");
-            splitter.next();
+            let header = splitter.next().expect("Unexpected empty line");
 
-            // Forward the /proc/stat data to the appropriate parser
+            // Forward the /proc/stat data to the appropriate parser, detecting
+            // any structural change in the file (caused by, for example, kernel
+            // updates or CPU hotplug) which we do not support at the moment.
+            const STRUCTURE_ERR: &'static str = "Unsupported structure change";
             match *target {
                 StatDataMember::AllCPUs => {
+                    assert_eq!(header, "cpu", "{}", STRUCTURE_ERR);
                     Self::force_push(&mut self.all_cpus, &mut splitter);
                 },
                 StatDataMember::EachCPU => {
+                    assert_eq!(&header[0..3], "cpu", "{}", STRUCTURE_ERR);
                     cpu_iter.next()
                             .expect("Per-cpu stats do not match each_cpu.len()")
                             .push(&mut splitter);
                 },
                 StatDataMember::Paging => {
+                    assert_eq!(header, "page", "{}", STRUCTURE_ERR);
                     Self::force_push(&mut self.paging, &mut splitter);
                 },
                 StatDataMember::Swapping => {
+                    assert_eq!(header, "swap", "{}", STRUCTURE_ERR);
                     Self::force_push(&mut self.swapping, &mut splitter);
                 },
                 StatDataMember::Interrupts => {
+                    assert_eq!(header, "intr", "{}", STRUCTURE_ERR);
                     Self::force_push(&mut self.interrupts, &mut splitter);
                 },
                 StatDataMember::ContextSwitches => {
+                    assert_eq!(header, "ctxt", "{}", STRUCTURE_ERR);
                     Self::force_push(&mut self.context_switches, &mut splitter);
                 },
+                StatDataMember::BootTime => {
+                    assert_eq!(header, "btime", "{}", STRUCTURE_ERR);
+                    // Nothing to do, we only measure boot time once
+                },
                 StatDataMember::ProcessForks => {
+                    assert_eq!(header, "processes", "{}", STRUCTURE_ERR);
                     Self::force_push(&mut self.process_forks, &mut splitter);
                 },
                 StatDataMember::RunnableProcesses => {
+                    assert_eq!(header, "procs_running", "{}", STRUCTURE_ERR);
                     Self::force_push(&mut self.runnable_processes,
                                      &mut splitter);
                 },
                 StatDataMember::BlockedProcesses => {
+                    assert_eq!(header, "procs_blocked", "{}", STRUCTURE_ERR);
                     Self::force_push(&mut self.blocked_processes,
                                      &mut splitter);
                 },
                 StatDataMember::SoftIRQs => {
+                    assert_eq!(header, "softirq", "{}", STRUCTURE_ERR);
                     Self::force_push(&mut self.softirqs, &mut splitter);
                 }
-                StatDataMember::BootTime | StatDataMember::Unsupported => {},
+                StatDataMember::Unsupported => {},
             }
         }
+
+        // At the end of parsing, we should have consumed all statistics from
+        // the file, otherwise the /proc/stat schema got updated behind our back
+        debug_assert!(!splitter.next_line(),
+                      "A stat record appeared out of nowhere");
 
         // At the end of parsing, all CPU threads should have been considered
         debug_assert!(cpu_iter.next().is_none(),
