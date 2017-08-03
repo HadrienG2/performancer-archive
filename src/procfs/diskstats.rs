@@ -1,6 +1,5 @@
 //! This module contains a sampling parser for /proc/diskstats
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 
@@ -15,15 +14,16 @@ struct DiskStatsData {
     /// List of iostat records following original file order (as in MemInfoData)
     records: Vec<DiskStatsRecord>,
 
-    /// Index mapping device numbers to the index of the associated record
-    device_numbers_index: HashMap<DeviceNumbers, usize>,
+    /// Device numbers associated with each record, again in file order
+    device_numbers: Vec<DeviceNumbers>,
 
-    /// Index mapping device names to the index of the associated record
-    device_name_index: HashMap<String, usize>,
+    /// Device names associated with each record, again in file order
+    device_names: Vec<String>,
 }
 //
 // TODO: Implement this
-// TODO: Think carefully about hotplug and how we want to handle it
+// TODO: Initially, handle hotplug by detecting structural file changes and
+//       panicking on them. Leave room for future growth.
 
 
 /// Sampled records from /proc/diskstats, with a zero-record optimization
