@@ -3,7 +3,6 @@
 use ::reader::ProcFileReader;
 use ::splitter::SplitLinesBySpace;
 use bytesize::ByteSize;
-use std::collections::HashMap;
 use std::io::Result;
 
 
@@ -40,23 +39,22 @@ impl MemInfoSampler {
 
 /// Data samples from /proc/meminfo, in structure-of-array layout
 ///
-/// As /proc/meminfo is basically a (large) set of named data volumes and
-/// performance counters, it maps very well to a homogeneous collection (with
-/// just an enum inside to disambiguate between volumes and counters).
+/// As /proc/meminfo is just a (large) set of named data volumes with a few
+/// performance counters sprinkled in the middle, it maps very well to a
+/// vector of enums.
 ///
-/// There is, however, a catch: for fast sampling, we want to be able to iterate
-/// over the records in the order in which they appear in /proc/meminfo. But for
-/// fast lookup, we want to be able to quickly find a certain entry. We resolve
-/// this dilemma by using a Vec for fast ordered access to the measurements
-/// during sampling, and a HashSet index for fast key lookup.
+/// When it comes to keys, the current layout is optimized for fast sampling
+/// with key checking, rather than fast lookup of a specific key. If clients
+/// expect to frequently need a mapping of key to records, they are encouraged
+/// to build and use a HashMap for this purpose.
 ///
 #[derive(Debug, PartialEq)]
 struct MemInfoData {
     /// Sampled meminfo records, in the order in which they appear in the file
     records: Vec<MemInfoRecord>,
 
-    /// Hashed index mapping the meminfo keys to the associated records above
-    index: HashMap<String, usize>,
+    /// Keys associated with each record, again in file order
+    keys: Vec<String>,
 }
 //
 impl MemInfoData {
@@ -66,7 +64,7 @@ impl MemInfoData {
         // Our data store will eventually go there
         let mut data = Self {
             records: Vec::new(),
-            index: HashMap::new(),
+            keys: Vec::new(),
         };
 
         // For each line of the initial content of /proc/meminfo...
@@ -79,24 +77,19 @@ impl MemInfoData {
                                      .expect("Unexpected empty line")
                                      .to_owned();
             assert_eq!(header.pop(), Some(':'),
-                       "meminfo headers should end with a colon");
+                       "Headers from meminfo should end with a colon");
 
             // Build a record for this line of /proc/meminfo
             let record = MemInfoRecord::new(&mut splitter);
 
             // Report unsupported records in debug mode
             debug_assert!(record != MemInfoRecord::Unsupported(0),
-                          "Missing support for meminfo record named {}",
+                          "Missing support for a meminfo record named {}",
                           header);
 
-            // Store record in our internal data store and index it
-            let record_index = data.records.len();
+            // Memorize the record and its key in our data store
             data.records.push(record);
-            let duplicate_entry = data.index.insert(header, record_index);
-
-            // No pair of entries in /proc/meminfo should have the same name
-            assert_eq!(duplicate_entry, None,
-                       "Duplicated meminfo entry detected");
+            data.keys.push(header);
         }
 
         // Return our data collection setup
@@ -108,15 +101,27 @@ impl MemInfoData {
     fn push(&mut self, file_contents: &str) {
         // This time, we know how lines of /proc/meminfo map to our members
         let mut splitter = SplitLinesBySpace::new(file_contents);
-        for record in self.records.iter_mut() {
-            // The beginning of parsing is the same as before: split by spaces.
-            // But this time, we discard the header, as we already know it.
+        for (record, key) in self.records.iter_mut().zip(self.keys.iter()) {
+            // We start by iterating over lines and checking that each line
+            // that we observed during initialization is still around
             assert!(splitter.next_line(), "A meminfo record has disappeared");
-            splitter.next();
+            let header = splitter.next().expect("Unexpected empty line");
+
+            // In release mode, we use the length of the header as a checksum
+            // to make sure that the internal structure did not change during
+            // sampling. In debug mode, we fully check the header.
+            assert_eq!(header.len()-1, key.len(),
+                       "Unsupported structural meminfo change during sampling");
+            debug_assert_eq!(&header[..header.len()-1], key,
+                             "Unsupported meminfo change during sampling");
 
             // Forward the data to the appropriate parser
             record.push(&mut splitter);
         }
+
+        // In debug mode, we also check that records did not appear out of blue
+        debug_assert!(!splitter.next_line(),
+                      "A meminfo record appeared out of nowhere");
     }
 
     /// Tell how many samples are present in the data store, and in debug mode
@@ -280,7 +285,7 @@ mod tests {
         let mut info = String::new();
         let empty_info = MemInfoData::new(&info);
         assert_eq!(empty_info.records.len(), 0);
-        assert_eq!(empty_info.index.len(), 0);
+        assert_eq!(empty_info.keys.len(), 0);
         assert_eq!(empty_info.len(), 0);
         let mut expected = empty_info;
 
@@ -288,7 +293,7 @@ mod tests {
         info.push_str("MyDataVolume:   1234 kB");
         let single_info = MemInfoData::new(&info);
         expected.records.push(MemInfoRecord::DataVolume(Vec::new()));
-        expected.index.insert("MyDataVolume".to_owned(), 0);
+        expected.keys.push("MyDataVolume".to_owned());
         assert_eq!(single_info, expected);
         assert_eq!(expected.len(), 0);
 
@@ -296,7 +301,7 @@ mod tests {
         info.push_str("\nMyCounter:   42");
         let double_info = MemInfoData::new(&info);
         expected.records.push(MemInfoRecord::Counter(Vec::new()));
-        expected.index.insert("MyCounter".to_owned(), 1);
+        expected.keys.push("MyCounter".to_owned());
         assert_eq!(double_info, expected);
         assert_eq!(expected.len(), 0);
     }
