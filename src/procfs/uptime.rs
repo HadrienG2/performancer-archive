@@ -32,8 +32,6 @@ impl UptimeSampler {
         let samples = &mut self.samples;
         self.reader.sample(|file_contents: &str| samples.push(file_contents))
     }
-
-    // TODO: Add accessors to the inner uptime data + associated tests
 }
 
 
@@ -107,10 +105,10 @@ mod tests {
     fn parse_uptime_data() {
         let mut data = UptimeData::new();
         data.push("13.52 50.34");
-        assert_eq!(data.wall_clock_uptime.len(), 1);
-        assert_eq!(data.wall_clock_uptime[0], Duration::new(13, 520_000_000));
-        assert_eq!(data.cpu_idle_time.len(), 1);
-        assert_eq!(data.cpu_idle_time[0], Duration::new(50, 340_000_000));
+        assert_eq!(data.wall_clock_uptime,
+                   vec![Duration::new(13, 520_000_000)]);
+        assert_eq!(data.cpu_idle_time,
+                   vec![Duration::new(50, 340_000_000)]);
         assert_eq!(data.len(), 1);
     }
     
