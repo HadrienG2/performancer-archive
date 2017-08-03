@@ -6,9 +6,8 @@ use super::StatDataStore;
 
 
 /// Interrupt statistics from /proc/stat, in structure-of-array layout
-// TODO: This should be pub(super), waiting for next rustc version...
 #[derive(Debug, PartialEq)]
-pub struct InterruptStatData {
+pub(super) struct InterruptStatData {
     /// Total number of interrupts that were serviced. May be higher than the
     /// sum of the breakdown below if there are unnumbered interrupt sources.
     total: Vec<u64>,
@@ -19,7 +18,6 @@ pub struct InterruptStatData {
 //
 impl InterruptStatData {
     /// Create new interrupt statistics, given the amount of interrupt sources
-    /// TODO: This should be pub(super), waiting for next rustc version...
     pub fn new(num_irqs: u16) -> Self {
         Self {
             total: Vec::new(),
@@ -53,6 +51,7 @@ impl StatDataStore for InterruptStatData {
         length
     }
 }
+///
 ///
 /// On some platforms such as x86, there are a lot of hardware IRQs (~500 on my
 /// machines), but most of them are unused and never fire. Parsing and storing

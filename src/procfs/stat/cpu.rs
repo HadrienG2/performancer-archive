@@ -8,9 +8,8 @@ use super::StatDataStore;
 
 
 /// The amount of CPU time that the system spent in various states
-/// TODO: This should be pub(super), waiting for next rustc version...
 #[derive(Clone, Debug, PartialEq)]
-pub struct CPUStatData {
+pub(super) struct CPUStatData {
     /// Time spent in user mode
     user_time: Vec<Duration>,
 
@@ -45,7 +44,6 @@ pub struct CPUStatData {
 //
 impl CPUStatData {
     /// Create new CPU statistics
-    /// TODO: This should be pub(super), waiting for next rustc version...
     pub fn new(num_timers: u8) -> Self {
         // Check if we know about all CPU timers
         debug_assert!(num_timers >= 4, "Some expected CPU timers are missing");

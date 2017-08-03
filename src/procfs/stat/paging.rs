@@ -6,9 +6,8 @@ use super::StatDataStore;
 
 
 /// Storage paging ativity statistics
-/// TODO: This should be pub(super), waiting for next rustc version...
 #[derive(Debug, PartialEq)]
-pub struct PagingStatData {
+pub(super) struct PagingStatData {
     /// Number of RAM pages that were paged in from disk
     incoming: Vec<u64>,
 
@@ -18,7 +17,6 @@ pub struct PagingStatData {
 //
 impl PagingStatData {
     /// Create new paging statistics
-    /// TODO: This should be pub(super), waiting for next rustc version...
     pub fn new() -> Self {
         Self {
             incoming: Vec::new(),
