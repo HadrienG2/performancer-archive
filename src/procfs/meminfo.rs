@@ -35,8 +35,6 @@ impl MemInfoSampler {
         let samples = &mut self.samples;
         self.reader.sample(|file_contents: &str| samples.push(file_contents))
     }
-
-    // TODO: Add accessors to the inner stat data + associated tests
 }
 
 
