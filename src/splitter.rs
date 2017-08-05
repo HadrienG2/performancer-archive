@@ -393,7 +393,6 @@ mod tests {
         assert_eq!(splitter.next(), Some("42"));
         assert_eq!(splitter.next(), None);
     }
-    // TODO: Test split_line
 
     /// INTERNAL: Given a string and its decomposition into lines and space-
     ///           separated columns, check if SplitLinesBySpace works on it.
