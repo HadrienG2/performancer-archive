@@ -405,7 +405,7 @@ mod tests {
         // Check that reading one column and skipping through the rest works
         lines = SplitLinesBySpace::new(string);
         for line in decomposition.iter() {
-            let mut columns = lines.next().unwrap();
+            let mut columns = lines.next().expect("Unexpected end of file");
             if line.len() >= 1 {
                 assert_eq!(columns.next(), Some(line[0]));
             }
@@ -415,7 +415,7 @@ mod tests {
         // And finish with full column iteration
         lines = SplitLinesBySpace::new(string);
         for line in decomposition.iter() {
-            let mut columns = lines.next().unwrap();
+            let mut columns = lines.next().expect("Unexpected end of file");
             for column in line.iter() {
                 assert_eq!(columns.next(), Some(*column));
             }
