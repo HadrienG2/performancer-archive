@@ -290,6 +290,20 @@ impl<'a> Iterator for FastCharIndices<'a> {
 // TODO: Implement FusedIterator once it is stable
 
 
+/// Testing code often needs to split a single line of text, even though The
+/// Real Thing operates on more complex input. This test harness handles this.
+#[cfg(test)]
+pub(crate) fn split_and_run<F, R>(input: &str, test_runner: F) -> R
+    where F: FnOnce(SplitColumns) -> R
+{
+    let mut lines = SplitLinesBySpace::new(input);
+    let first_line = lines.next().expect("Input should not be empty");
+    let result = test_runner(first_line);
+    assert_eq!(lines.next(), None, "Input should be only one line long");
+    result
+}
+
+
 /// Unit tests
 #[cfg(test)]
 mod tests {
@@ -390,6 +404,20 @@ mod tests {
         // What we do not test so well, however, is whether the iterator's state
         // remains consistent at word boundaries. Hence this last test.
         test_splitter("This. Is\nSPARTA", &[&[&"This.", &"Is"], &[&"SPARTA"]]);
+    }
+
+    // Test that split_and_run behaves as expected:
+    #[test]
+    fn split_and_run() {
+        let answer = super::split_and_run("The answer is 42", |columns| {
+            assert_eq!(columns.next(), Some("The"));
+            assert_eq!(columns.next(), Some("answer"));
+            assert_eq!(columns.next(), Some("is"));
+            assert_eq!(columns.next(), Some("42"));
+            assert_eq!(columns.next(), None);
+            42
+        });
+        assert_eq!(answer, 42);
     }
 
     /// INTERNAL: Given a string and its decomposition into lines and space-
