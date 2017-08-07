@@ -297,8 +297,7 @@ pub(crate) fn split_and_run<F, R>(input: &str, test_runner: F) -> R
     where F: FnOnce(SplitColumns) -> R
 {
     let mut lines = SplitLinesBySpace::new(input);
-    let first_line = lines.next().expect("Input should not be empty");
-    let result = test_runner(first_line);
+    let result = test_runner(lines.next().expect("Input should not be empty"));
     assert_eq!(lines.next(), None, "Input should be only one line long");
     result
 }
@@ -409,7 +408,7 @@ mod tests {
     // Test that split_and_run behaves as expected:
     #[test]
     fn split_and_run() {
-        let answer = super::split_and_run("The answer is 42", |columns| {
+        let answer = super::split_and_run("The answer is 42", |mut columns| {
             assert_eq!(columns.next(), Some("The"));
             assert_eq!(columns.next(), Some("answer"));
             assert_eq!(columns.next(), Some("is"));
