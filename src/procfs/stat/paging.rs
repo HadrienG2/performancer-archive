@@ -52,7 +52,7 @@ impl StatDataStore for PagingStatData {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::splitter::split_line;
+    use ::splitter::split_and_run;
     use super::{PagingStatData, StatDataStore};
 
     /// Check that paging statistics initialization works as expected
@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn parse_paging_stat() {
         let mut stats = PagingStatData::new();
-        stats.push(&mut split_line("123 456"));
+        stats.push_str("123 456");
         assert_eq!(stats.incoming, vec![123]);
         assert_eq!(stats.outgoing, vec![456]);
         assert_eq!(stats.len(), 1);

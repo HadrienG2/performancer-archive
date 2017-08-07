@@ -114,7 +114,7 @@ impl InterruptCounts {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::splitter::split_line;
+    use ::splitter::split_and_run;
     use super::{InterruptCounts, InterruptStatData, StatDataStore};
 
     /// Check that initializing an interrupt count sampler works as expected
@@ -180,14 +180,14 @@ mod tests {
     fn parse_interrupt_stat() {
         // Interrupt statistics without any detail
         let mut no_details_stats = InterruptStatData::new(0);
-        no_details_stats.push(&mut split_line("12345"));
+        no_details_stats.push_str("12345");
         assert_eq!(no_details_stats.total, vec![12345]);
         assert_eq!(no_details_stats.details.len(), 0);
         assert_eq!(no_details_stats.len(), 1);
 
         // Interrupt statistics with two detailed counters
         let mut two_stats = InterruptStatData::new(2);
-        two_stats.push(&mut split_line("12345 678 910"));
+        two_stats.push_str("12345 678 910");
         assert_eq!(two_stats.total, vec![12345]);
         assert_eq!(two_stats.details, 
                    vec![InterruptCounts::Samples(vec![678]),

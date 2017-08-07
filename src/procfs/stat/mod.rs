@@ -407,6 +407,13 @@ trait StatDataStore {
     /// Parse and record a sample of data from /proc/stat
     fn push(&mut self, splitter: SplitColumns);
 
+    /// In testing code, working from a raw string is sometimes more convenient
+    #[cfg(test)]
+    fn push_str(&mut self, input: &str) {
+        use splitter::split_and_run;
+        split_and_run(input, |mut columns| self.push(columns))
+    }
+
     /// Number of data samples that were recorded so far
     #[cfg(test)]
     fn len(&self) -> usize;
@@ -435,7 +442,6 @@ impl<T, U> StatDataStore for Vec<T>
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::splitter::split_line;
     use chrono::{TimeZone, Utc};
     use super::{CPUStatData, InterruptStatData, PagingStatData, StatData,
                 StatDataMember, StatDataStore, StatSampler};
@@ -445,7 +451,7 @@ mod tests {
     fn parse_scalar_stat() {
         let mut scalar_stats = Vec::<u64>::new();
         assert_eq!(StatDataStore::len(&scalar_stats), 0);
-        StatDataStore::push(&mut scalar_stats, &mut split_line("123"));
+        StatDataStore::push_str(&mut scalar_stats, "123");
         assert_eq!(scalar_stats, vec![123]);
         assert_eq!(StatDataStore::len(&scalar_stats), 1);
     }
@@ -577,7 +583,7 @@ mod tests {
         expected = StatData::new(&stats);
         expected.all_cpus.as_mut()
                          .expect("CPU stats incorrectly marked as missing")
-                         .push(&mut split_line("1 2 3 4"));
+                         .push_str("1 2 3 4");
         assert_eq!(global_cpu_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -589,9 +595,9 @@ mod tests {
         expected = StatData::new(&stats);
         expected.all_cpus.as_mut()
                          .expect("CPU stats incorrectly marked as missing")
-                         .push(&mut split_line("1 2 3 4"));
-        expected.each_cpu[0].push(&mut split_line("0 1 1 3"));
-        expected.each_cpu[1].push(&mut split_line("1 1 2 1"));
+                         .push_str("1 2 3 4");
+        expected.each_cpu[0].push_str("0 1 1 3");
+        expected.each_cpu[1].push_str("1 1 2 1");
         assert_eq!(local_cpu_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -602,7 +608,7 @@ mod tests {
         expected = StatData::new(&stats);
         expected.paging.as_mut()
                        .expect("Paging stats incorrectly marked as missing")
-                       .push(&mut split_line("42 43"));
+                       .push_str("42 43");
         assert_eq!(paging_stats, expected);
         assert_eq!(expected.len(), 1);
 
@@ -613,7 +619,7 @@ mod tests {
         expected = StatData::new(&stats);
         expected.softirqs.as_mut()
                          .expect("Softirq stats incorrectly marked as missing")
-                         .push(&mut split_line("94651 1561 21211 12 71867"));
+                         .push_str("94651 1561 21211 12 71867");
         assert_eq!(softirq_stats, expected);
         assert_eq!(expected.len(), 1);
     }
