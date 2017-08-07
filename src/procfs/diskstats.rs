@@ -111,7 +111,15 @@ enum DiskStatsRecord {
     },
 }
 //
-// TODO: Implement this
+impl DiskStatsRecord {
+    // TODO: Create a new record
+    //       fn new(raw_data: &mut SplitLinesBySpace) -> Self {
+    // TODO: Push new data inside of the record
+    //       fn push(&mut self, raw_data: &mut SplitLinesBySpace) {
+    // TODO: Tell how many samples are present in the data store
+    //       #[cfg(test)]
+    //       fn len(&self) -> usize {
+}
 
 
 /// Device identifier based on major and minor device numbers
