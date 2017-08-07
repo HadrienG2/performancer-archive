@@ -1,7 +1,7 @@
 //! This module contains a sampling parser for /proc/meminfo
 
 use ::reader::ProcFileReader;
-use ::splitter::SplitLinesBySpace;
+use ::splitter::{SplitColumns, SplitLinesBySpace};
 use bytesize::ByteSize;
 use std::io::Result;
 
@@ -68,19 +68,19 @@ impl MemInfoData {
         };
 
         // For each line of the initial content of /proc/meminfo...
-        let mut splitter = SplitLinesBySpace::new(initial_contents);
-        while splitter.next_line() {
+        let mut lines = SplitLinesBySpace::new(initial_contents);
+        while let Some(mut columns) = lines.next() {
             // ...and check that the header has the expected format. It should
             // consist of a non-empty string key, followed by a colon, which we
             // shall get rid of along the way.
-            let mut header = splitter.next()
-                                     .expect("Unexpected empty line")
-                                     .to_owned();
+            let mut header = columns.next()
+                                    .expect("Unexpected empty line")
+                                    .to_owned();
             assert_eq!(header.pop(), Some(':'),
                        "Headers from meminfo should end with a colon");
 
             // Build a record for this line of /proc/meminfo
-            let record = MemInfoRecord::new(&mut splitter);
+            let record = MemInfoRecord::new(columns);
 
             // Report unsupported records in debug mode
             debug_assert!(record != MemInfoRecord::Unsupported(0),
@@ -100,12 +100,13 @@ impl MemInfoData {
     /// corresponding entries in the internal data store
     fn push(&mut self, file_contents: &str) {
         // This time, we know how lines of /proc/meminfo map to our members
-        let mut splitter = SplitLinesBySpace::new(file_contents);
+        let mut lines = SplitLinesBySpace::new(file_contents);
         for (record, key) in self.records.iter_mut().zip(self.keys.iter()) {
             // We start by iterating over lines and checking that each line
             // that we observed during initialization is still around
-            assert!(splitter.next_line(), "A meminfo record has disappeared");
-            let header = splitter.next().expect("Unexpected empty line");
+            let mut columns = lines.next()
+                                   .expect("A meminfo record has disappeared");
+            let header = columns.next().expect("Unexpected empty line");
 
             // In release mode, we use the length of the header as a checksum
             // to make sure that the internal structure did not change during
@@ -116,12 +117,12 @@ impl MemInfoData {
                              "Unsupported meminfo change during sampling");
 
             // Forward the data to the appropriate parser
-            record.push(&mut splitter);
+            record.push(columns);
         }
 
         // In debug mode, we also check that records did not appear out of blue
-        debug_assert!(!splitter.next_line(),
-                      "A meminfo record appeared out of nowhere");
+        debug_assert_eq!(lines.next(), None,
+                         "A meminfo record appeared out of nowhere");
     }
 
     /// Tell how many samples are present in the data store, and in debug mode
@@ -159,7 +160,7 @@ enum MemInfoRecord {
 //
 impl MemInfoRecord {
     /// Create a new record, choosing the type based on some raw data
-    fn new(raw_data: &mut SplitLinesBySpace) -> Self {
+    fn new(raw_data: SplitColumns) -> Self {
         // The raw data should start with a numerical field. Make sure that we
         // can parse it. Otherwise, we don't support the associated content.
         let number_parse_result = raw_data.next()
@@ -184,7 +185,7 @@ impl MemInfoRecord {
     }
 
     /// Push new data inside of the record
-    fn push(&mut self, raw_data: &mut SplitLinesBySpace) {
+    fn push(&mut self, raw_data: SplitColumns) {
         // Use our knowledge from the first parse to tell what this should be
         match *self {
             // A data volume in kibibytes
