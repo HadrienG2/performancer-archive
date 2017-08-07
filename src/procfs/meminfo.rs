@@ -160,7 +160,7 @@ enum MemInfoRecord {
 //
 impl MemInfoRecord {
     /// Create a new record, choosing the type based on some raw data
-    fn new(raw_data: SplitColumns) -> Self {
+    fn new(mut raw_data: SplitColumns) -> Self {
         // The raw data should start with a numerical field. Make sure that we
         // can parse it. Otherwise, we don't support the associated content.
         let number_parse_result = raw_data.next()
@@ -185,7 +185,7 @@ impl MemInfoRecord {
     }
 
     /// Push new data inside of the record
-    fn push(&mut self, raw_data: SplitColumns) {
+    fn push(&mut self, mut raw_data: SplitColumns) {
         // Use our knowledge from the first parse to tell what this should be
         match *self {
             // A data volume in kibibytes

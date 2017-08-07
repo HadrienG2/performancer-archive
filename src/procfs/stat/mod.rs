@@ -418,10 +418,10 @@ impl<T, U> StatDataStore for Vec<T>
     where T: FromStr<Err=U>,
           U: Debug
 {
-    fn push(&mut self, splitter: SplitColumns) {
-        self.push(splitter.next().expect("Expected statistical data")
-                       .parse().expect("Failed to parse statistical data"));
-        debug_assert!(splitter.next().is_none(),
+    fn push(&mut self, mut columns: SplitColumns) {
+        self.push(columns.next().expect("Expected statistical data")
+                         .parse().expect("Failed to parse statistical data"));
+        debug_assert!(columns.next().is_none(),
                       "No other statistical data should be present");
     }
 
