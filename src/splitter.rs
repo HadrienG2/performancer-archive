@@ -30,16 +30,24 @@ use std::ascii::AsciiExt;
 /// To use this pseudo-file splitter, proceed as follows:
 ///
 /// - Initialize it on an input string with new()
-/// - To iterate over lines, call next_line() as long as it returns true
-/// - To iterate over columns, use this as a normal (**non-fused**) iterator
+/// - To iterate over lines, call next(). If there is a line of text left in the
+///   input, this will produce an iterator over the space-separated columns of
+///   that line, otherwise this function will return None.
 ///
-/// Note that since the iterator is reused after each line, you cannot consume
-/// it using methods like count(). Since counting columns is often useful when
-/// initializing a parser, we provide a helper col_count() method which consumes
-/// the file columns until the next line and returns their count.
+/// This interface was designed to mimick regular Rust iterators, except for the
+/// fact that the "parent" line iterator and its "children" column iterators
+/// actually share a common character iterator under the hood.
+///
+/// Working in this fashion avoids internally parsing each line of input twice,
+/// once for extracting the line and another time for separating its columns.
+/// This makes a nice difference in performance in our memory-bound parsing
+/// scenarios. However, it also introduces additional restrictions with respect
+/// to standard Rust iterators. For example, a column iterator cannot be live at
+/// the time where SplitLinesBySpace::next() is called, as it would be
+/// invalidated. Hence SplitLinesBySpace cannot implement std::iter::Iterator.
 ///
 pub(crate) struct SplitLinesBySpace<'a> {
-    /// Reference to the sring which we are trying to split
+    /// Reference to the string which we are trying to split
     target: &'a str,
 
     /// Iterator over the characters and their byte indices
@@ -66,15 +74,17 @@ impl<'a> SplitLinesBySpace<'a> {
         }
     }
 
-    /// Try to go to the beginning of the next line. Return true if successful,
-    /// false if we reached the end of the file and there is no next line.
-    pub fn next_line(&mut self) -> bool {
+    /// Iterate over lines (see caveats in struct description)
+    /// TODO: Consider implementing some variation of StreamingIterator
+    pub fn next<'b>(&'b mut self) -> Option<SplitColumns<'a, 'b>>
+        where 'a: 'b
+    {
         match self.status {
             // We are at the beginning of a line of text. Tell the client that
             // it can parse it, and be ready to skip it on the next call.
             LineSpaceSplitterStatus::AtLineStart => {
                 self.status = LineSpaceSplitterStatus::InsideLine;
-                return true;
+                return Some(SplitColumns{ parent: self });
             },
 
             // We are in the middle of a line of text. Skip it by iterating
@@ -86,9 +96,9 @@ impl<'a> SplitLinesBySpace<'a> {
                     Some('\n') => {
                         if self.char_iter.is_empty() {
                             self.status = LineSpaceSplitterStatus::AtInputEnd;
-                            return false;
+                            return None;
                         } else {
-                            return true;
+                            return Some(SplitColumns{ parent: self });
                         }
                     }
 
@@ -98,42 +108,51 @@ impl<'a> SplitLinesBySpace<'a> {
                     // We reached the end of the input, and will stop there.
                     None => {
                         self.status = LineSpaceSplitterStatus::AtInputEnd;
-                        return false;
+                        return None;
                     },
                 }
             },
 
             // There is no next line, we are at the end of the input string
-            LineSpaceSplitterStatus::AtInputEnd => return false,
+            LineSpaceSplitterStatus::AtInputEnd => return None,
         }
-    }
-
-    /// Consume the current line, indicating how many space-separated columns
-    /// were encountered, but without consuming the entire iterator.
-    pub fn col_count(&mut self) -> usize {
-        let mut word_count = 0usize;
-        while self.next().is_some() {
-            word_count += 1;
-        }
-        word_count
     }
 }
+///
+/// State machine used by SplitLinesBySpace when iterating over lines
+#[derive(Debug, PartialEq)]
+enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
+///
+///
+/// For each line of the input text, SplitLinesBySpace produces an iterator over
+/// the space-separated columns of that line. This inner iterator advances the
+/// internal character iterator of the "outer" SplitLinesBySpace, so as long as
+/// it is alive, SplitLinesBySpace cannot be iterated over further.
+///
+/// The reason why we moved towards this rather complex streaming design, rather
+/// than directly allowing SplitLinesBySpace to iterate over columns as it did
+/// before, is that it allows the column iterator to be consumed ("moved away"),
+/// which unlocks the full power of the standard Rust iteration interface.
+///
+pub(crate) struct SplitColumns<'a, 'b> where 'a: 'b {
+    /// Underlying SplitLinesBySpace iterator
+    parent: &'b mut SplitLinesBySpace<'a>,
+}
 //
-// Column iteration is handled using the standard Rust iterator interface.
-impl<'a> Iterator for SplitLinesBySpace<'a> {
+impl<'a, 'b> Iterator for SplitColumns<'a, 'b> {
     /// We're outputting strings
     type Item = &'a str;
 
     /// This is how one iterates through space-separated columns until a newline
     fn next(&mut self) -> Option<Self::Item> {
         // The caller should have properly called next_line() beforehand
-        assert_eq!(self.status, LineSpaceSplitterStatus::InsideLine);
+        assert_eq!(self.parent.status, LineSpaceSplitterStatus::InsideLine);
 
         // Find the first non-space character before the end of line (if any):
         // that will be the start of the next word.
         let first_idx;
         loop {
-            match self.char_iter.next() {
+            match self.parent.char_iter.next() {
                 // Discard all the spaces along the way.
                 Some(' ') => continue,
 
@@ -141,23 +160,24 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
                 // of space-separated data that it's time to yield control back
                 // to the line iterator (which we configure along the way).
                 Some('\n') => {
-                    self.status = if self.char_iter.is_empty() {
-                                      LineSpaceSplitterStatus::AtInputEnd
-                                  } else {
-                                      LineSpaceSplitterStatus::AtLineStart
-                                  };
+                    self.parent.status =
+                        if self.parent.char_iter.is_empty() {
+                            LineSpaceSplitterStatus::AtInputEnd
+                        } else {
+                            LineSpaceSplitterStatus::AtLineStart
+                        };
                     return None;
                 },
 
                 // Record the index of the first non-space character
                 Some(_) => {
-                    first_idx = self.char_iter.prev_index();
+                    first_idx = self.parent.char_iter.prev_index();
                     break;
                 },
 
                 // Terminate when the end of the text is reached
                 None => {
-                    self.status = LineSpaceSplitterStatus::AtInputEnd;
+                    self.parent.status = LineSpaceSplitterStatus::AtInputEnd;
                     return None;
                 },
             }
@@ -169,19 +189,19 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
         // first the word, then a None to signal the line ending. We handle that
         // using the backtracking ability of FastCharIndices.
         loop {
-            match self.char_iter.next() {
+            match self.parent.char_iter.next() {
                 // We reached the end of a word: output said word.
                 Some(' ') => {
-                    let last_idx = self.char_iter.prev_index();
-                    return Some(&self.target[first_idx..last_idx]);
+                    let last_idx = self.parent.char_iter.prev_index();
+                    return Some(&self.parent.target[first_idx..last_idx]);
                 },
 
                 // Newlines also terminate words, but we must put them back in
                 // because we also want to subsequently signal them with a None.
                 Some('\n') => {
-                    let last_idx = self.char_iter.prev_index();
-                    self.char_iter.back();
-                    return Some(&self.target[first_idx..last_idx]);
+                    let last_idx = self.parent.char_iter.prev_index();
+                    self.parent.char_iter.back();
+                    return Some(&self.parent.target[first_idx..last_idx]);
                 }
 
                 // We are still in the middle of the word: move on
@@ -189,15 +209,11 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
 
                 // We reached the end of the input: output the last word. We do
                 // not need to backtrack since the character iterator is fused.
-                None => return Some(&self.target[first_idx..]),
+                None => return Some(&self.parent.target[first_idx..]),
             }
         }
     }
 }
-///
-/// State machine used by SplitLinesBySpace when iterating over lines
-#[derive(Debug, PartialEq)]
-enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
 ///
 ///
 /// A conceptual cousin of PutBack<CharIndices>, which we used before, but more
