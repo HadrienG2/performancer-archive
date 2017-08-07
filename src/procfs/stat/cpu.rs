@@ -1,7 +1,7 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the "cpu" sections of /proc/stat.
 
-use ::splitter::SplitLinesBySpace;
+use ::splitter::SplitColumns;
 use libc;
 use std::time::Duration;
 use super::StatDataStore;
@@ -81,7 +81,7 @@ impl CPUStatData {
 //
 impl StatDataStore for CPUStatData {
     /// Parse CPU statistics and add them to the internal data store
-    fn push(&mut self, stats: &mut SplitLinesBySpace) {
+    fn push(&mut self, stats: SplitColumns) {
         // This scope is needed to please rustc's current borrow checker
         {
             // This is how we parse the next duration from the input (if any)

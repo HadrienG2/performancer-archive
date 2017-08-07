@@ -1,7 +1,7 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the IRQ statistics of /proc/stat (intr and softirq).
 
-use ::splitter::SplitLinesBySpace;
+use ::splitter::SplitColumns;
 use super::StatDataStore;
 
 
@@ -28,7 +28,7 @@ impl InterruptStatData {
 //
 impl StatDataStore for InterruptStatData {
     /// Parse interrupt statistics and add them to the internal data store
-    fn push(&mut self, stats: &mut SplitLinesBySpace) {
+    fn push(&mut self, stats: SplitColumns) {
         // Load the total interrupt count
         self.total.push(stats.next().expect("Total IRQ count missing")
                              .parse().expect("Failed to parse IRQ count"));

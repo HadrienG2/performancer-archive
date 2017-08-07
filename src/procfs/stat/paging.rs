@@ -1,7 +1,7 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the paging statistics of /proc/stat (page and swap).
 
-use splitter::SplitLinesBySpace;
+use splitter::SplitColumns;
 use super::StatDataStore;
 
 
@@ -27,7 +27,7 @@ impl PagingStatData {
 //
 impl StatDataStore for PagingStatData {
     /// Parse paging statistics and add them to the internal data store
-    fn push(&mut self, stats: &mut SplitLinesBySpace) {
+    fn push(&mut self, stats: SplitColumns) {
         // Load the incoming and outgoing page count
         self.incoming.push(stats.next().expect("Missing incoming page count")
                                 .parse().expect("Could not parse page count"));
