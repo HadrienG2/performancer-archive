@@ -162,7 +162,6 @@ lazy_static! {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::splitter::split_and_run;
     use std::time::Duration;
     use super::{CPUStatData, StatDataStore, TICKS_PER_SEC};
 

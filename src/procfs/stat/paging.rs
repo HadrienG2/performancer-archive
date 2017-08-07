@@ -52,7 +52,6 @@ impl StatDataStore for PagingStatData {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::splitter::split_and_run;
     use super::{PagingStatData, StatDataStore};
 
     /// Check that paging statistics initialization works as expected

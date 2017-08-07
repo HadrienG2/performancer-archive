@@ -411,7 +411,7 @@ trait StatDataStore {
     #[cfg(test)]
     fn push_str(&mut self, input: &str) {
         use splitter::split_and_run;
-        split_and_run(input, |mut columns| self.push(columns))
+        split_and_run(input, |columns| self.push(columns))
     }
 
     /// Number of data samples that were recorded so far
