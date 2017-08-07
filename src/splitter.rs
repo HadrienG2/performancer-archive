@@ -46,6 +46,7 @@ use std::ascii::AsciiExt;
 /// the time where SplitLinesBySpace::next() is called, as it would be
 /// invalidated. Hence SplitLinesBySpace cannot implement std::iter::Iterator.
 ///
+#[derive(Debug, PartialEq)]
 pub(crate) struct SplitLinesBySpace<'a> {
     /// Reference to the string which we are trying to split
     target: &'a str,
@@ -134,6 +135,7 @@ enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
 /// before, is that it allows the column iterator to be consumed ("moved away"),
 /// which unlocks the full power of the standard Rust iteration interface.
 ///
+#[derive(Debug, PartialEq)]
 pub(crate) struct SplitColumns<'a, 'b> where 'a: 'b {
     /// Underlying SplitLinesBySpace iterator
     parent: &'b mut SplitLinesBySpace<'a>,
@@ -226,6 +228,7 @@ impl<'a, 'b> Iterator for SplitColumns<'a, 'b> {
 /// This iterator is fused: it will continue to output None indefinitely after
 /// the end. We will later signal this via the FusedIterator marker trait.
 ///
+#[derive(Debug, PartialEq)]
 struct FastCharIndices<'a> {
     /// Byte-wise view of the original ASCII string
     raw_bytes: &'a [u8],
@@ -285,16 +288,6 @@ impl<'a> Iterator for FastCharIndices<'a> {
 }
 //
 // TODO: Implement FusedIterator once it is stable
-
-
-/// Testing code often needs to split a single line of text, even though the
-/// Real Thing needs to operate over multiple lines of text. We got you covered.
-#[cfg(test)]
-pub(crate) fn split_line(input: &str) -> SplitLinesBySpace {
-    let mut line_splitter = SplitLinesBySpace::new(input);
-    assert!(line_splitter.next_line());
-    line_splitter
-}
 
 
 /// Unit tests
@@ -399,54 +392,35 @@ mod tests {
         test_splitter("This. Is\nSPARTA", &[&[&"This.", &"Is"], &[&"SPARTA"]]);
     }
 
-    // Test that split_line behaves as expected:
-    #[test]
-    fn split_line() {
-        let mut splitter = super::split_line("The answer is 42");
-        assert_eq!(splitter.next(), Some("The"));
-        assert_eq!(splitter.next(), Some("answer"));
-        assert_eq!(splitter.next(), Some("is"));
-        assert_eq!(splitter.next(), Some("42"));
-        assert_eq!(splitter.next(), None);
-    }
-
     /// INTERNAL: Given a string and its decomposition into lines and space-
     ///           separated columns, check if SplitLinesBySpace works on it.
     fn test_splitter(string: &str, decomposition: &[&[&str]]) {
         // Start by skipping through the lines
-        let mut splitter = SplitLinesBySpace::new(string);
+        let mut lines = SplitLinesBySpace::new(string);
         for _ in decomposition.iter() {
-            assert!(splitter.next_line());
+            assert!(lines.next().is_some());
         }
-        assert!(!splitter.next_line());
-
-        // Then count the columns of each line
-        splitter = SplitLinesBySpace::new(string);
-        for line in decomposition.iter() {
-            assert!(splitter.next_line());
-            assert_eq!(splitter.col_count(), line.len());
-        }
-        assert!(!splitter.next_line());
+        assert_eq!(lines.next(), None);
 
         // Check that reading one column and skipping through the rest works
-        splitter = SplitLinesBySpace::new(string);
+        lines = SplitLinesBySpace::new(string);
         for line in decomposition.iter() {
-            assert!(splitter.next_line());
+            let mut columns = lines.next().unwrap();
             if line.len() >= 1 {
-                assert_eq!(splitter.next(), Some(line[0]));
+                assert_eq!(columns.next(), Some(line[0]));
             }
         }
-        assert!(!splitter.next_line());
+        assert_eq!(lines.next(), None);
 
         // And finish with full column iteration
-        let mut splitter = SplitLinesBySpace::new(string);
+        lines = SplitLinesBySpace::new(string);
         for line in decomposition.iter() {
-            assert!(splitter.next_line());
+            let mut columns = lines.next().unwrap();
             for column in line.iter() {
-                assert_eq!(splitter.next(), Some(*column));
+                assert_eq!(columns.next(), Some(*column));
             }
-            assert_eq!(splitter.next(), None);
+            assert_eq!(columns.next(), None);
         }
-        assert!(!splitter.next_line());
+        assert_eq!(lines.next(), None);
     }
 }
