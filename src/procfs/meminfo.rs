@@ -222,8 +222,8 @@ impl MemInfoRecord {
     /// For testing purposes, pushing in a string can be more convenient
     #[cfg(test)]
     fn push_str(&mut self, raw_data: &str) {
-        use ::splitter::split_and_run;
-        split_and_run(raw_data, |columns| self.push(columns))
+        use ::splitter::split_line_and_run;
+        split_line_and_run(raw_data, |columns| self.push(columns))
     }
 
     /// Tell how many samples are present in the data store
@@ -241,7 +241,7 @@ impl MemInfoRecord {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::splitter::split_and_run;
+    use ::splitter::split_line_and_run;
     use super::{ByteSize, MemInfoData, MemInfoRecord, MemInfoSampler};
 
     /// Check that meminfo record initialization works well
@@ -368,7 +368,7 @@ mod tests {
 
     /// INTERNAL: Build a MemInfoRecord using columns from a certain string
     fn build_record(input: &str) -> MemInfoRecord {
-        split_and_run(input, |columns| MemInfoRecord::new(columns))
+        split_line_and_run(input, |columns| MemInfoRecord::new(columns))
     }
 }
 

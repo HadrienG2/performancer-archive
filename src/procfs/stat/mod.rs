@@ -410,8 +410,8 @@ trait StatDataStore {
     /// In testing code, working from a raw string is sometimes more convenient
     #[cfg(test)]
     fn push_str(&mut self, input: &str) {
-        use splitter::split_and_run;
-        split_and_run(input, |columns| self.push(columns))
+        use splitter::split_line_and_run;
+        split_line_and_run(input, |columns| self.push(columns))
     }
 
     /// Number of data samples that were recorded so far

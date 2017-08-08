@@ -293,7 +293,7 @@ impl<'a> Iterator for FastCharIndices<'a> {
 /// Testing code often needs to split a single line of text, even though The
 /// Real Thing operates on more complex input. This test harness handles this.
 #[cfg(test)]
-pub(crate) fn split_and_run<F, R>(input: &str, test_runner: F) -> R
+pub(crate) fn split_line_and_run<F, R>(input: &str, test_runner: F) -> R
     where F: FnOnce(SplitColumns) -> R
 {
     let mut lines = SplitLinesBySpace::new(input);
@@ -405,10 +405,10 @@ mod tests {
         test_splitter("This. Is\nSPARTA", &[&[&"This.", &"Is"], &[&"SPARTA"]]);
     }
 
-    // Test that split_and_run behaves as expected:
+    // Test that split_line_and_run behaves as expected:
     #[test]
-    fn split_and_run() {
-        let answer = super::split_and_run("The answer is 42", |mut columns| {
+    fn split_line_and_run() {
+        let answer = super::split_line_and_run("The answer is 42", |mut columns| {
             assert_eq!(columns.next(), Some("The"));
             assert_eq!(columns.next(), Some("answer"));
             assert_eq!(columns.next(), Some("is"));
