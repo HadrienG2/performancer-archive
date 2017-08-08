@@ -219,6 +219,13 @@ impl MemInfoRecord {
         }
     }
 
+    /// For testing purposes, pushing in a string can be more convenient
+    #[cfg(test)]
+    fn push_str(&mut self, raw_data: &str) {
+        use ::splitter::split_and_run;
+        split_and_run(raw_data, |columns| self.push(columns))
+    }
+
     /// Tell how many samples are present in the data store
     #[cfg(test)]
     fn len(&self) -> usize {
@@ -261,21 +268,21 @@ mod tests {
     fn parse_record() {
         // Data volume record
         let mut size_record = build_record("24 kB");
-        push_in_record(&mut size_record, "512 kB");
+        size_record.push_str("512 kB");
         assert_eq!(size_record,
                    MemInfoRecord::DataVolume(vec![ByteSize::kib(512)]));
         assert_eq!(size_record.len(), 1);
 
         // Counter record
         let mut counter_record = build_record("1337");
-        push_in_record(&mut counter_record, "371830");
+        counter_record.push_str("371830");
         assert_eq!(counter_record,
                    MemInfoRecord::Counter(vec![371830]));
         assert_eq!(counter_record.len(), 1);
 
         // Unsupported record
         let mut bad_record = build_record("57 TiB");
-        push_in_record(&mut bad_record, "332 PiB");
+        bad_record.push_str("332 PiB");
         assert_eq!(bad_record, MemInfoRecord::Unsupported(1));
         assert_eq!(bad_record.len(), 1);
     }
@@ -323,7 +330,7 @@ mod tests {
         let mut single_info = MemInfoData::new(&info);
         single_info.push(&info);
         expected = MemInfoData::new(&info);
-        push_in_record(&mut expected.records[0], "1234 kB");
+        expected.records[0].push_str("1234 kB");
         assert_eq!(single_info, expected);
         assert_eq!(expected.len(), 1);
 
@@ -332,8 +339,8 @@ mod tests {
         let mut double_info = MemInfoData::new(&info);
         double_info.push(&info);
         expected = MemInfoData::new(&info);
-        push_in_record(&mut expected.records[0], "1234 kB");
-        push_in_record(&mut expected.records[1], "42");
+        expected.records[0].push_str("1234 kB");
+        expected.records[1].push_str("42");
         assert_eq!(double_info, expected);
         assert_eq!(expected.len(), 1);
     }
@@ -362,11 +369,6 @@ mod tests {
     /// INTERNAL: Build a MemInfoRecord using columns from a certain string
     fn build_record(input: &str) -> MemInfoRecord {
         split_and_run(input, |columns| MemInfoRecord::new(columns))
-    }
-
-    /// INTERNAL: Push columns from a certain string into a MemInfoRecord
-    fn push_in_record(record: &mut MemInfoRecord, input: &str) {
-        split_and_run(input, |columns| record.push(columns))
     }
 }
 
