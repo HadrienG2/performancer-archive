@@ -137,12 +137,11 @@ impl<'a> SplitLinesBySpace<'a> {
                 // of space-separated data that it's time to yield control back
                 // to the line iterator (which we configure along the way).
                 Some('\n') => {
-                    self.status =
-                        if self.char_iter.is_empty() {
-                            LineSpaceSplitterStatus::AtInputEnd
-                        } else {
-                            LineSpaceSplitterStatus::AtLineStart
-                        };
+                    self.status = if self.char_iter.is_empty() {
+                                      LineSpaceSplitterStatus::AtInputEnd
+                                  } else {
+                                      LineSpaceSplitterStatus::AtLineStart
+                                  };
                     return None;
                 },
 
