@@ -1,7 +1,7 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the IRQ statistics of /proc/stat (intr and softirq).
 
-use ::splitter::SplitLinesBySpace;
+use ::splitter::SplitColumns;
 use super::StatDataStore;
 
 
@@ -28,7 +28,7 @@ impl InterruptStatData {
 //
 impl StatDataStore for InterruptStatData {
     /// Parse interrupt statistics and add them to the internal data store
-    fn push(&mut self, stats: &mut SplitLinesBySpace) {
+    fn push(&mut self, mut stats: SplitColumns) {
         // Load the total interrupt count
         self.total.push(stats.next().expect("Total IRQ count missing")
                              .parse().expect("Failed to parse IRQ count"));
@@ -114,7 +114,6 @@ impl InterruptCounts {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::splitter::split_line;
     use super::{InterruptCounts, InterruptStatData, StatDataStore};
 
     /// Check that initializing an interrupt count sampler works as expected
@@ -180,14 +179,14 @@ mod tests {
     fn parse_interrupt_stat() {
         // Interrupt statistics without any detail
         let mut no_details_stats = InterruptStatData::new(0);
-        no_details_stats.push(&mut split_line("12345"));
+        no_details_stats.push_str("12345");
         assert_eq!(no_details_stats.total, vec![12345]);
         assert_eq!(no_details_stats.details.len(), 0);
         assert_eq!(no_details_stats.len(), 1);
 
         // Interrupt statistics with two detailed counters
         let mut two_stats = InterruptStatData::new(2);
-        two_stats.push(&mut split_line("12345 678 910"));
+        two_stats.push_str("12345 678 910");
         assert_eq!(two_stats.total, vec![12345]);
         assert_eq!(two_stats.details, 
                    vec![InterruptCounts::Samples(vec![678]),

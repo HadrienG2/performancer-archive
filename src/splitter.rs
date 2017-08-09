@@ -30,16 +30,25 @@ use std::ascii::AsciiExt;
 /// To use this pseudo-file splitter, proceed as follows:
 ///
 /// - Initialize it on an input string with new()
-/// - To iterate over lines, call next_line() as long as it returns true
-/// - To iterate over columns, use this as a normal (**non-fused**) iterator
+/// - To iterate over lines, call next(). If there is a line of text left in the
+///   input, this will produce an iterator over the space-separated columns of
+///   that line, otherwise this function will return None.
 ///
-/// Note that since the iterator is reused after each line, you cannot consume
-/// it using methods like count(). Since counting columns is often useful when
-/// initializing a parser, we provide a helper col_count() method which consumes
-/// the file columns until the next line and returns their count.
+/// This interface was designed to mimick regular Rust iterators, except for the
+/// fact that the "parent" line iterator and its "children" column iterators
+/// actually share a common character iterator under the hood.
 ///
+/// Working in this fashion avoids internally parsing each line of input twice,
+/// once for extracting the line and another time for separating its columns.
+/// This makes a nice difference in performance in our memory-bound parsing
+/// scenarios. However, it also introduces additional restrictions with respect
+/// to standard Rust iterators. For example, a column iterator cannot be live at
+/// the time where SplitLinesBySpace::next() is called, as it would be
+/// invalidated. Hence SplitLinesBySpace cannot implement std::iter::Iterator.
+///
+#[derive(Debug, PartialEq)]
 pub(crate) struct SplitLinesBySpace<'a> {
-    /// Reference to the sring which we are trying to split
+    /// Reference to the string which we are trying to split
     target: &'a str,
 
     /// Iterator over the characters and their byte indices
@@ -66,15 +75,17 @@ impl<'a> SplitLinesBySpace<'a> {
         }
     }
 
-    /// Try to go to the beginning of the next line. Return true if successful,
-    /// false if we reached the end of the file and there is no next line.
-    pub fn next_line(&mut self) -> bool {
+    /// Iterate over lines (see caveats in struct description)
+    /// TODO: Consider implementing some variation of StreamingIterator
+    pub fn next<'b>(&'b mut self) -> Option<SplitColumns<'a, 'b>>
+        where 'a: 'b
+    {
         match self.status {
             // We are at the beginning of a line of text. Tell the client that
             // it can parse it, and be ready to skip it on the next call.
             LineSpaceSplitterStatus::AtLineStart => {
                 self.status = LineSpaceSplitterStatus::InsideLine;
-                return true;
+                return Some(SplitColumns{ parent: self });
             },
 
             // We are in the middle of a line of text. Skip it by iterating
@@ -86,9 +97,9 @@ impl<'a> SplitLinesBySpace<'a> {
                     Some('\n') => {
                         if self.char_iter.is_empty() {
                             self.status = LineSpaceSplitterStatus::AtInputEnd;
-                            return false;
+                            return None;
                         } else {
-                            return true;
+                            return Some(SplitColumns{ parent: self });
                         }
                     }
 
@@ -98,34 +109,19 @@ impl<'a> SplitLinesBySpace<'a> {
                     // We reached the end of the input, and will stop there.
                     None => {
                         self.status = LineSpaceSplitterStatus::AtInputEnd;
-                        return false;
+                        return None;
                     },
                 }
             },
 
             // There is no next line, we are at the end of the input string
-            LineSpaceSplitterStatus::AtInputEnd => return false,
+            LineSpaceSplitterStatus::AtInputEnd => return None,
         }
     }
 
-    /// Consume the current line, indicating how many space-separated columns
-    /// were encountered, but without consuming the entire iterator.
-    pub fn col_count(&mut self) -> usize {
-        let mut word_count = 0usize;
-        while self.next().is_some() {
-            word_count += 1;
-        }
-        word_count
-    }
-}
-//
-// Column iteration is handled using the standard Rust iterator interface.
-impl<'a> Iterator for SplitLinesBySpace<'a> {
-    /// We're outputting strings
-    type Item = &'a str;
-
-    /// This is how one iterates through space-separated columns until a newline
-    fn next(&mut self) -> Option<Self::Item> {
+    // INTERNAL: Iterate over the space-separated columns of the current line.
+    //           This is essentially the implementation of SplitColumns::next().
+    fn next_col(&mut self) -> Option<&'a str> {
         // The caller should have properly called next_line() beforehand
         assert_eq!(self.status, LineSpaceSplitterStatus::InsideLine);
 
@@ -200,6 +196,33 @@ impl<'a> Iterator for SplitLinesBySpace<'a> {
 enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
 ///
 ///
+/// For each line of the input text, SplitLinesBySpace produces an iterator over
+/// the space-separated columns of that line. This inner iterator advances the
+/// internal character iterator of the "outer" SplitLinesBySpace, so as long as
+/// it is alive, SplitLinesBySpace cannot be iterated over further.
+///
+/// The reason why we moved towards this rather complex streaming design, rather
+/// than directly allowing SplitLinesBySpace to iterate over columns as it did
+/// before, is that it allows the column iterator to be consumed ("moved away"),
+/// which unlocks the full power of the standard Rust iteration interface.
+///
+#[derive(Debug, PartialEq)]
+pub(crate) struct SplitColumns<'a, 'b> where 'a: 'b {
+    /// Underlying SplitLinesBySpace iterator
+    parent: &'b mut SplitLinesBySpace<'a>,
+}
+//
+impl<'a, 'b> Iterator for SplitColumns<'a, 'b> {
+    /// We're outputting strings
+    type Item = &'a str;
+
+    /// This is how one iterates through space-separated columns until a newline
+    fn next(&mut self) -> Option<Self::Item> {
+        self.parent.next_col()
+    }
+}
+///
+///
 /// A conceptual cousin of PutBack<CharIndices>, which we used before, but more
 /// tightly optimized for the needs of SplitLinesBySpace:
 ///
@@ -210,6 +233,7 @@ enum LineSpaceSplitterStatus { AtLineStart, InsideLine, AtInputEnd }
 /// This iterator is fused: it will continue to output None indefinitely after
 /// the end. We will later signal this via the FusedIterator marker trait.
 ///
+#[derive(Debug, PartialEq)]
 struct FastCharIndices<'a> {
     /// Byte-wise view of the original ASCII string
     raw_bytes: &'a [u8],
@@ -271,13 +295,16 @@ impl<'a> Iterator for FastCharIndices<'a> {
 // TODO: Implement FusedIterator once it is stable
 
 
-/// Testing code often needs to split a single line of text, even though the
-/// Real Thing needs to operate over multiple lines of text. We got you covered.
+/// Testing code often needs to split a single line of text, even though The
+/// Real Thing operates on more complex input. This test harness handles this.
 #[cfg(test)]
-pub(crate) fn split_line(input: &str) -> SplitLinesBySpace {
-    let mut line_splitter = SplitLinesBySpace::new(input);
-    assert!(line_splitter.next_line());
-    line_splitter
+pub(crate) fn split_line_and_run<F, R>(input: &str, test_runner: F) -> R
+    where F: FnOnce(SplitColumns) -> R
+{
+    let mut lines = SplitLinesBySpace::new(input);
+    let result = test_runner(lines.next().expect("Input should not be empty"));
+    assert_eq!(lines.next(), None, "Input should be only one line long");
+    result
 }
 
 
@@ -383,54 +410,49 @@ mod tests {
         test_splitter("This. Is\nSPARTA", &[&[&"This.", &"Is"], &[&"SPARTA"]]);
     }
 
-    // Test that split_line behaves as expected:
+    // Test that split_line_and_run behaves as expected:
     #[test]
-    fn split_line() {
-        let mut splitter = super::split_line("The answer is 42");
-        assert_eq!(splitter.next(), Some("The"));
-        assert_eq!(splitter.next(), Some("answer"));
-        assert_eq!(splitter.next(), Some("is"));
-        assert_eq!(splitter.next(), Some("42"));
-        assert_eq!(splitter.next(), None);
+    fn split_line_and_run() {
+        let answer = super::split_line_and_run("The answer is 42", |mut columns| {
+            assert_eq!(columns.next(), Some("The"));
+            assert_eq!(columns.next(), Some("answer"));
+            assert_eq!(columns.next(), Some("is"));
+            assert_eq!(columns.next(), Some("42"));
+            assert_eq!(columns.next(), None);
+            42
+        });
+        assert_eq!(answer, 42);
     }
 
     /// INTERNAL: Given a string and its decomposition into lines and space-
     ///           separated columns, check if SplitLinesBySpace works on it.
     fn test_splitter(string: &str, decomposition: &[&[&str]]) {
         // Start by skipping through the lines
-        let mut splitter = SplitLinesBySpace::new(string);
+        let mut lines = SplitLinesBySpace::new(string);
         for _ in decomposition.iter() {
-            assert!(splitter.next_line());
+            assert!(lines.next().is_some());
         }
-        assert!(!splitter.next_line());
-
-        // Then count the columns of each line
-        splitter = SplitLinesBySpace::new(string);
-        for line in decomposition.iter() {
-            assert!(splitter.next_line());
-            assert_eq!(splitter.col_count(), line.len());
-        }
-        assert!(!splitter.next_line());
+        assert_eq!(lines.next(), None);
 
         // Check that reading one column and skipping through the rest works
-        splitter = SplitLinesBySpace::new(string);
+        lines = SplitLinesBySpace::new(string);
         for line in decomposition.iter() {
-            assert!(splitter.next_line());
+            let mut columns = lines.next().expect("Unexpected end of file");
             if line.len() >= 1 {
-                assert_eq!(splitter.next(), Some(line[0]));
+                assert_eq!(columns.next(), Some(line[0]));
             }
         }
-        assert!(!splitter.next_line());
+        assert_eq!(lines.next(), None);
 
         // And finish with full column iteration
-        let mut splitter = SplitLinesBySpace::new(string);
+        lines = SplitLinesBySpace::new(string);
         for line in decomposition.iter() {
-            assert!(splitter.next_line());
+            let mut columns = lines.next().expect("Unexpected end of file");
             for column in line.iter() {
-                assert_eq!(splitter.next(), Some(*column));
+                assert_eq!(columns.next(), Some(*column));
             }
-            assert_eq!(splitter.next(), None);
+            assert_eq!(columns.next(), None);
         }
-        assert!(!splitter.next_line());
+        assert_eq!(lines.next(), None);
     }
 }

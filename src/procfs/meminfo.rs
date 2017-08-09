@@ -1,7 +1,7 @@
 //! This module contains a sampling parser for /proc/meminfo
 
 use ::reader::ProcFileReader;
-use ::splitter::SplitLinesBySpace;
+use ::splitter::{SplitColumns, SplitLinesBySpace};
 use bytesize::ByteSize;
 use std::io::Result;
 
@@ -68,19 +68,19 @@ impl MemInfoData {
         };
 
         // For each line of the initial content of /proc/meminfo...
-        let mut splitter = SplitLinesBySpace::new(initial_contents);
-        while splitter.next_line() {
+        let mut lines = SplitLinesBySpace::new(initial_contents);
+        while let Some(mut columns) = lines.next() {
             // ...and check that the header has the expected format. It should
             // consist of a non-empty string key, followed by a colon, which we
             // shall get rid of along the way.
-            let mut header = splitter.next()
-                                     .expect("Unexpected empty line")
-                                     .to_owned();
+            let mut header = columns.next()
+                                    .expect("Unexpected empty line")
+                                    .to_owned();
             assert_eq!(header.pop(), Some(':'),
                        "Headers from meminfo should end with a colon");
 
             // Build a record for this line of /proc/meminfo
-            let record = MemInfoRecord::new(&mut splitter);
+            let record = MemInfoRecord::new(columns);
 
             // Report unsupported records in debug mode
             debug_assert!(record != MemInfoRecord::Unsupported(0),
@@ -100,12 +100,13 @@ impl MemInfoData {
     /// corresponding entries in the internal data store
     fn push(&mut self, file_contents: &str) {
         // This time, we know how lines of /proc/meminfo map to our members
-        let mut splitter = SplitLinesBySpace::new(file_contents);
+        let mut lines = SplitLinesBySpace::new(file_contents);
         for (record, key) in self.records.iter_mut().zip(self.keys.iter()) {
             // We start by iterating over lines and checking that each line
             // that we observed during initialization is still around
-            assert!(splitter.next_line(), "A meminfo record has disappeared");
-            let header = splitter.next().expect("Unexpected empty line");
+            let mut columns = lines.next()
+                                   .expect("A meminfo record has disappeared");
+            let header = columns.next().expect("Unexpected empty line");
 
             // In release mode, we use the length of the header as a checksum
             // to make sure that the internal structure did not change during
@@ -116,12 +117,12 @@ impl MemInfoData {
                              "Unsupported meminfo change during sampling");
 
             // Forward the data to the appropriate parser
-            record.push(&mut splitter);
+            record.push(columns);
         }
 
         // In debug mode, we also check that records did not appear out of blue
-        debug_assert!(!splitter.next_line(),
-                      "A meminfo record appeared out of nowhere");
+        debug_assert_eq!(lines.next(), None,
+                         "A meminfo record appeared out of nowhere");
     }
 
     /// Tell how many samples are present in the data store, and in debug mode
@@ -159,7 +160,7 @@ enum MemInfoRecord {
 //
 impl MemInfoRecord {
     /// Create a new record, choosing the type based on some raw data
-    fn new(raw_data: &mut SplitLinesBySpace) -> Self {
+    fn new(mut raw_data: SplitColumns) -> Self {
         // The raw data should start with a numerical field. Make sure that we
         // can parse it. Otherwise, we don't support the associated content.
         let number_parse_result = raw_data.next()
@@ -184,7 +185,7 @@ impl MemInfoRecord {
     }
 
     /// Push new data inside of the record
-    fn push(&mut self, raw_data: &mut SplitLinesBySpace) {
+    fn push(&mut self, mut raw_data: SplitColumns) {
         // Use our knowledge from the first parse to tell what this should be
         match *self {
             // A data volume in kibibytes
@@ -218,6 +219,13 @@ impl MemInfoRecord {
         }
     }
 
+    /// For testing purposes, pushing in a string can be more convenient
+    #[cfg(test)]
+    fn push_str(&mut self, raw_data: &str) {
+        use ::splitter::split_line_and_run;
+        split_line_and_run(raw_data, |columns| self.push(columns))
+    }
+
     /// Tell how many samples are present in the data store
     #[cfg(test)]
     fn len(&self) -> usize {
@@ -233,24 +241,24 @@ impl MemInfoRecord {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::splitter::split_line;
+    use ::splitter::split_line_and_run;
     use super::{ByteSize, MemInfoData, MemInfoRecord, MemInfoSampler};
 
     /// Check that meminfo record initialization works well
     #[test]
     fn init_record() {
         // Data volume record
-        let data_vol_record = MemInfoRecord::new(&mut split_line("42 kB"));
+        let data_vol_record = build_record("42 kB");
         assert_eq!(data_vol_record, MemInfoRecord::DataVolume(Vec::new()));
         assert_eq!(data_vol_record.len(), 0);
 
         // Counter record
-        let counter_record = MemInfoRecord::new(&mut split_line("713705"));
+        let counter_record = build_record("713705");
         assert_eq!(counter_record, MemInfoRecord::Counter(Vec::new()));
         assert_eq!(counter_record.len(), 0);
 
         // Unsupported record
-        let bad_record = MemInfoRecord::new(&mut split_line("73 MiB"));
+        let bad_record = build_record("73 MiB");
         assert_eq!(bad_record, MemInfoRecord::Unsupported(0));
         assert_eq!(bad_record.len(), 0);
     }
@@ -259,21 +267,22 @@ mod tests {
     #[test]
     fn parse_record() {
         // Data volume record
-        let mut size_record = MemInfoRecord::new(&mut split_line("24 kB"));
-        size_record.push(&mut split_line("512 kB"));
+        let mut size_record = build_record("24 kB");
+        size_record.push_str("512 kB");
         assert_eq!(size_record,
                    MemInfoRecord::DataVolume(vec![ByteSize::kib(512)]));
         assert_eq!(size_record.len(), 1);
 
         // Counter record
-        let mut counter_record = MemInfoRecord::new(&mut split_line("1337"));
-        counter_record.push(&mut split_line("371830"));
-        assert_eq!(counter_record, MemInfoRecord::Counter(vec![371830]));
+        let mut counter_record = build_record("1337");
+        counter_record.push_str("371830");
+        assert_eq!(counter_record,
+                   MemInfoRecord::Counter(vec![371830]));
         assert_eq!(counter_record.len(), 1);
 
         // Unsupported record
-        let mut bad_record = MemInfoRecord::new(&mut split_line("57 TiB"));
-        bad_record.push(&mut split_line("332 PiB"));
+        let mut bad_record = build_record("57 TiB");
+        bad_record.push_str("332 PiB");
         assert_eq!(bad_record, MemInfoRecord::Unsupported(1));
         assert_eq!(bad_record.len(), 1);
     }
@@ -321,7 +330,7 @@ mod tests {
         let mut single_info = MemInfoData::new(&info);
         single_info.push(&info);
         expected = MemInfoData::new(&info);
-        expected.records[0].push(&mut split_line("1234 kB"));
+        expected.records[0].push_str("1234 kB");
         assert_eq!(single_info, expected);
         assert_eq!(expected.len(), 1);
 
@@ -330,8 +339,8 @@ mod tests {
         let mut double_info = MemInfoData::new(&info);
         double_info.push(&info);
         expected = MemInfoData::new(&info);
-        expected.records[0].push(&mut split_line("1234 kB"));
-        expected.records[1].push(&mut split_line("42"));
+        expected.records[0].push_str("1234 kB");
+        expected.records[1].push_str("42");
         assert_eq!(double_info, expected);
         assert_eq!(expected.len(), 1);
     }
@@ -355,6 +364,11 @@ mod tests {
         assert_eq!(stats.samples.len(), 1);
         stats.sample().expect("Failed to sample meminfo twice");
         assert_eq!(stats.samples.len(), 2);
+    }
+
+    /// INTERNAL: Build a MemInfoRecord using columns from a certain string
+    fn build_record(input: &str) -> MemInfoRecord {
+        split_line_and_run(input, |columns| MemInfoRecord::new(columns))
     }
 }
 
