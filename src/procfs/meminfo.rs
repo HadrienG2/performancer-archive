@@ -1,6 +1,5 @@
 //! This module contains a sampling parser for /proc/meminfo
 
-use ::reader::ProcFileReader;
 use ::sampler::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use bytesize::ByteSize;

@@ -4,7 +4,6 @@ mod cpu;
 mod interrupt;
 mod paging;
 
-use ::reader::ProcFileReader;
 use ::sampler::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use chrono::{DateTime, TimeZone, Utc};

@@ -1,7 +1,6 @@
 //! This module contains a sampling parser for /proc/uptime
 
 use ::procfs;
-use ::reader::ProcFileReader;
 use ::sampler::PseudoFileParser;
 use std::io::Result;
 use std::time::Duration;
@@ -22,7 +21,9 @@ struct UptimeData {
 //
 impl PseudoFileParser for UptimeData {
     /// Create a new uptime data store
-    fn new(_: &str) -> Self {
+    fn new(initial_contents: &str) -> Self {
+        debug_assert_eq!(initial_contents.split_whitespace().count(), 2,
+                         "Unsupported entry found in /proc/uptime");
         Self {
             wall_clock_uptime: Vec::new(),
             cpu_idle_time: Vec::new(),

@@ -31,6 +31,9 @@
 ///
 macro_rules! define_sampler {
     ($sampler:ident : $file_location:expr => $parser:ty) => {
+        // We use ProcFileReader, which the host module shouldn't need
+        use ::reader::ProcFileReader;
+
         /// Mechanism for sampling measurements from $file_location
         pub struct $sampler {
             /// Reader object for $file_location
