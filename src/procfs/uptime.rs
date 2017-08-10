@@ -71,7 +71,7 @@ mod tests {
     /// Check that creating an uptime data store works
     #[test]
     fn init_uptime_data() {
-        let data = UptimeData::new("");
+        let data = UptimeData::new("56.78 12.34");
         assert_eq!(data.wall_clock_uptime.len(), 0);
         assert_eq!(data.cpu_idle_time.len(), 0);
         assert_eq!(data.len(), 0);
@@ -80,7 +80,7 @@ mod tests {
     /// Check that parsing uptime data works
     #[test]
     fn parse_uptime_data() {
-        let mut data = UptimeData::new("");
+        let mut data = UptimeData::new("10.11 12.13");
         data.push("13.52 50.34");
         assert_eq!(data.wall_clock_uptime,
                    vec![Duration::new(13, 520_000_000)]);
