@@ -122,30 +122,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use ::reader::ProcFileReader;
-    use super::UptimeSampler;
-    use testbench;
-
-    /// Benchmark for the raw uptime readout overhead
-    #[test]
-    #[ignore]
-    fn readout_overhead() {
-        let mut reader =
-            ProcFileReader::open("/proc/uptime")
-                           .expect("Failed to access uptime");
-        testbench::benchmark(3_000_000, || {
-            reader.sample(|_| {}).expect("Failed to sample uptime");
-        });
-    }
-
-    /// Benchmark for the full uptime sampling overhead
-    #[test]
-    #[ignore]
-    fn sampling_overhead() {
-        let mut uptime =
-            UptimeSampler::new().expect("Failed to create uptime sampler");
-        testbench::benchmark(3_000_000, || {
-            uptime.sample().expect("Failed to sample uptime");
-        });
-    }
+    define_sampler_benchs!{ super::UptimeSampler,
+                            "/proc/uptime",
+                            3_000_000 }
 }

@@ -420,8 +420,7 @@ impl<T, U> StatDataStore for Vec<T>
 mod tests {
     use chrono::{TimeZone, Utc};
     use super::{CPUStatData, InterruptStatData, PagingStatData,
-                PseudoFileParser, StatData, StatDataMember, StatDataStore,
-                StatSampler};
+                PseudoFileParser, StatData, StatDataMember, StatDataStore};
 
     /// Check that scalar statistics parsing works as expected
     #[test]
@@ -602,7 +601,7 @@ mod tests {
     }
 
     /// Check that the sampler works well
-    define_sampler_tests!{ StatSampler }
+    define_sampler_tests!{ super::StatSampler }
 }
 
 
@@ -612,30 +611,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use ::reader::ProcFileReader;
-    use super::StatSampler;
-    use testbench;
-
-    /// Benchmark for the raw stat readout overhead
-    #[test]
-    #[ignore]
-    fn readout_overhead() {
-        let mut reader = ProcFileReader::open("/proc/stat")
-                                        .expect("Failed to open CPU stats");
-        testbench::benchmark(100_000, || {
-            reader.sample(|_| {}).expect("Failed to read CPU stats");
-        });
-    }
-
-    /// Benchmark for the full stat sampling overhead
-    #[test]
-    #[ignore]
-    fn sampling_overhead() {
-        let mut stat =
-            StatSampler::new()
-                        .expect("Failed to create a CPU stats sampler");
-        testbench::benchmark(100_000, || {
-            stat.sample().expect("Failed to sample CPU stats");
-        });
-    }
+    define_sampler_benchs!{ super::StatSampler,
+                            "/proc/stat",
+                            100_000 }
 }

@@ -215,8 +215,7 @@ impl MemInfoRecord {
 #[cfg(test)]
 mod tests {
     use ::splitter::split_line_and_run;
-    use super::{ByteSize, MemInfoData, MemInfoRecord, MemInfoSampler,
-                PseudoFileParser};
+    use super::{ByteSize, MemInfoData, MemInfoRecord, PseudoFileParser};
 
     /// Check that meminfo record initialization works well
     #[test]
@@ -320,7 +319,7 @@ mod tests {
     }
 
     /// Check that the sampler works well
-    define_sampler_tests!{ MemInfoSampler }
+    define_sampler_tests!{ super::MemInfoSampler }
 
     /// INTERNAL: Build a MemInfoRecord using columns from a certain string
     fn build_record(input: &str) -> MemInfoRecord {
@@ -335,31 +334,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use ::reader::ProcFileReader;
-    use super::MemInfoSampler;
-    use testbench;
-
-    /// Benchmark for the raw meminfo readout overhead
-    #[test]
-    #[ignore]
-    fn readout_overhead() {
-        let mut reader =
-            ProcFileReader::open("/proc/meminfo")
-                           .expect("Failed to open memory info");
-        testbench::benchmark(500_000, || {
-            reader.sample(|_| {}).expect("Failed to read memory info");
-        });
-    }
-
-    /// Benchmark for the full meminfo sampling overhead
-    #[test]
-    #[ignore]
-    fn sampling_overhead() {
-        let mut stat =
-            MemInfoSampler::new()
-                           .expect("Failed to create a memory info sampler");
-        testbench::benchmark(500_000, || {
-            stat.sample().expect("Failed to sample memory info");
-        });
-    }
+    define_sampler_benchs!{ super::MemInfoSampler,
+                            "/proc/meminfo",
+                            500_000 }
 }

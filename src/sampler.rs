@@ -86,7 +86,7 @@ pub trait PseudoFileParser {
 /// Generate the tests associated with a certain sampler
 ///
 /// This macro should be invoked inside of the module associated with the unit
-/// tests for a certain pseudo-file. The sampler should be in scope.
+/// tests for a certain pseudo-file.
 ///
 macro_rules! define_sampler_tests {
     ($sampler:ty) => {
@@ -109,4 +109,40 @@ macro_rules! define_sampler_tests {
            assert_eq!(sampler.samples.len(), 2);
         }
     };
+}
+
+
+/// Generate the performance benchmarks associated with a certain sampler
+///
+/// This macro should be invoked inside of the module associated with the
+/// benchmarks for a certain pseudo-file.
+///
+macro_rules! define_sampler_benchs {
+    ($sampler:ty, $file_location:expr, $bench_iters:expr) => {
+        use ::reader::ProcFileReader;
+        use testbench;
+
+        /// Benchmark for the raw pseudo-file readout overhead
+        #[test]
+        #[ignore]
+        fn readout_overhead() {
+            let mut reader =
+                ProcFileReader::open($file_location)
+                               .expect("Failed to open pseudo-file");
+            testbench::benchmark($bench_iters, || {
+                reader.sample(|_| {}).expect("Failed to read pseudo-file");
+            });
+        }
+
+        /// Benchmark for the full pseudo-file sampling overhead
+        #[test]
+        #[ignore]
+        fn sampling_overhead() {
+            let mut stat = <$sampler>::new()
+                                      .expect("Failed to create a sampler");
+            testbench::benchmark($bench_iters, || {
+                stat.sample().expect("Failed to sample data");
+            });
+        }
+    }
 }
