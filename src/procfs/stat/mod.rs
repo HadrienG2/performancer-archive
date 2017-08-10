@@ -5,6 +5,7 @@ mod interrupt;
 mod paging;
 
 use ::reader::ProcFileReader;
+use ::sampler::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use chrono::{DateTime, TimeZone, Utc};
 use self::cpu::CPUStatData;
@@ -15,34 +16,8 @@ use std::io::Result;
 use std::str::FromStr;
 
 
-/// Mechanism for sampling measurements from /proc/stat
-pub struct StatSampler {
-    /// Reader object for /proc/stat
-    reader: ProcFileReader,
-
-    /// Sampled statistical data
-    samples: StatData,
-}
-//
-impl StatSampler {
-    /// Create a new sampler of /proc/stat
-    pub fn new() -> Result<Self> {
-        let mut reader = ProcFileReader::open("/proc/stat")?;
-        let samples = reader.sample(|contents| StatData::new(contents))?;
-        Ok(
-            Self {
-                reader,
-                samples,
-            }
-        )
-    }
-
-    /// Acquire a new sample of statistical data
-    pub fn sample(&mut self) -> Result<()> {
-        let samples = &mut self.samples;
-        self.reader.sample(|contents: &str| samples.push(contents))
-    }
-}
+// Implement a sampler for /proc/meminfo using MemInfoData for parsing & storage
+define_sampler!{ StatSampler : "/proc/stat" => StatData }
 
 
 /// Data samples from /proc/stat, in structure-of-array layout
@@ -108,7 +83,7 @@ struct StatData {
     line_target: Vec<StatDataMember>,
 }
 //
-impl StatData {
+impl PseudoFileParser for StatData {
     /// Create a new statistical data store, using a first sample to know the
     /// structure of /proc/stat on this system
     fn new(initial_contents: &str) -> Self {
@@ -340,7 +315,9 @@ impl StatData {
         Self::update_len(&mut opt_len, &self.softirqs);
         opt_len.unwrap_or(0)
     }
-
+}
+//
+impl StatData {
     /// INTERNAL: Helpful wrapper for pushing into optional containers that we
     ///           actually know from additional metadata to be around
     fn force_push<T>(store: &mut Option<T>, columns: SplitColumns)
@@ -442,8 +419,9 @@ impl<T, U> StatDataStore for Vec<T>
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
-    use super::{CPUStatData, InterruptStatData, PagingStatData, StatData,
-                StatDataMember, StatDataStore, StatSampler};
+    use super::{CPUStatData, InterruptStatData, PagingStatData,
+                PseudoFileParser, StatData, StatDataMember, StatDataStore,
+                StatSampler};
 
     /// Check that scalar statistics parsing works as expected
     #[test]
@@ -623,26 +601,8 @@ mod tests {
         assert_eq!(expected.len(), 1);
     }
 
-    /// Check that sampler initialization works well
-    #[test]
-    fn init_sampler() {
-        let stats =
-            StatSampler::new()
-                        .expect("Failed to create a /proc/stat sampler");
-        assert_eq!(stats.samples.len(), 0);
-    }
-
-    /// Check that basic sampling works as expected
-    #[test]
-    fn basic_sampling() {
-        let mut stats =
-            StatSampler::new()
-                        .expect("Failed to create a /proc/stat sampler");
-        stats.sample().expect("Failed to sample stats once");
-        assert_eq!(stats.samples.len(), 1);
-        stats.sample().expect("Failed to sample stats twice");
-        assert_eq!(stats.samples.len(), 2);
-    }
+    /// Check that the sampler works well
+    define_sampler_tests!{ StatSampler }
 }
 
 

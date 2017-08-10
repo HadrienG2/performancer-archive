@@ -15,6 +15,8 @@ extern crate libc;
 extern crate regex;
 extern crate testbench;
 
+#[macro_use] mod sampler;
+
 pub mod procfs;
 mod reader;
 mod splitter;
