@@ -2,7 +2,6 @@
 
 use ::procfs;
 use ::sampler::PseudoFileParser;
-use std::io::Result;
 use std::time::Duration;
 
 

@@ -3,7 +3,6 @@
 use ::sampler::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use bytesize::ByteSize;
-use std::io::Result;
 
 // Implement a sampler for /proc/meminfo using MemInfoData for parsing & storage
 define_sampler!{ MemInfoSampler : "/proc/meminfo" => MemInfoData }

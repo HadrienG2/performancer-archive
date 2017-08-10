@@ -11,11 +11,10 @@ use self::cpu::CPUStatData;
 use self::interrupt::InterruptStatData;
 use self::paging::PagingStatData;
 use std::fmt::Debug;
-use std::io::Result;
 use std::str::FromStr;
 
 
-// Implement a sampler for /proc/meminfo using MemInfoData for parsing & storage
+// Implement a sampler for /proc/stat using StatData for parsing & storage
 define_sampler!{ StatSampler : "/proc/stat" => StatData }
 
 

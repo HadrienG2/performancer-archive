@@ -31,8 +31,9 @@
 ///
 macro_rules! define_sampler {
     ($sampler:ident : $file_location:expr => $parser:ty) => {
-        // We use ProcFileReader, which the host module shouldn't need
+        // Hopefully the host won't need to import these...
         use ::reader::ProcFileReader;
+        use std::io;
 
         /// Mechanism for sampling measurements from $file_location
         pub struct $sampler {
@@ -45,7 +46,7 @@ macro_rules! define_sampler {
         //
         impl $sampler {
             /// Create a new sampler for $file_location
-            pub fn new() -> Result<Self> {
+            pub fn new() -> io::Result<Self> {
                 let mut reader = ProcFileReader::open($file_location)?;
                 let samples = reader.sample(|initial| <$parser>::new(initial))?;
                 Ok(
@@ -57,7 +58,7 @@ macro_rules! define_sampler {
             }
 
             /// Acquire a new sample of data from $file_location
-            pub fn sample(&mut self) -> Result<()> {
+            pub fn sample(&mut self) -> io::Result<()> {
                 let samples = &mut self.samples;
                 self.reader.sample(|contents: &str| samples.push(contents))
             }
