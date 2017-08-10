@@ -1,38 +1,13 @@
 //! This module contains a sampling parser for /proc/uptime
 
 use ::procfs;
-use ::reader::ProcFileReader;
+use ::sampler::PseudoFileParser;
 use std::io::Result;
 use std::time::Duration;
 
 
-/// Mechanism for sampling measurements from /proc/uptime
-pub struct UptimeSampler {
-    /// Reader object for /proc/uptime
-    reader: ProcFileReader,
-
-    /// Sampled uptime data
-    samples: UptimeData,
-}
-//
-impl UptimeSampler {
-    /// Create a new sampler of /proc/uptime
-    pub fn new() -> Result<Self> {
-        let reader = ProcFileReader::open("/proc/uptime")?;
-        Ok(
-            Self {
-                reader,
-                samples: UptimeData::new(),
-            }
-        )
-    }
-
-    /// Acquire a new sample of uptime data
-    pub fn sample(&mut self) -> Result<()> {
-        let samples = &mut self.samples;
-        self.reader.sample(|file_contents: &str| samples.push(file_contents))
-    }
-}
+// Implement a sampler for /proc/uptime using UptimeData for parsing & storage
+define_sampler!{ UptimeSampler : "/proc/uptime" => UptimeData }
 
 
 /// Data samples from /proc/uptime, in structure-of-array layout
@@ -44,9 +19,11 @@ struct UptimeData {
     cpu_idle_time: Vec<Duration>,
 }
 //
-impl UptimeData {
+impl PseudoFileParser for UptimeData {
     /// Create a new uptime data store
-    fn new() -> Self {
+    fn new(initial_contents: &str) -> Self {
+        debug_assert_eq!(initial_contents.split_whitespace().count(), 2,
+                         "Unsupported entry found in /proc/uptime");
         Self {
             wall_clock_uptime: Vec::new(),
             cpu_idle_time: Vec::new(),
@@ -89,12 +66,12 @@ impl UptimeData {
 mod tests {
     use std::thread;
     use std::time::Duration;
-    use super::{UptimeData, UptimeSampler};
+    use super::{PseudoFileParser, UptimeData, UptimeSampler};
 
     /// Check that creating an uptime data store works
     #[test]
     fn init_uptime_data() {
-        let data = UptimeData::new();
+        let data = UptimeData::new("");
         assert_eq!(data.wall_clock_uptime.len(), 0);
         assert_eq!(data.cpu_idle_time.len(), 0);
         assert_eq!(data.len(), 0);
@@ -103,7 +80,7 @@ mod tests {
     /// Check that parsing uptime data works
     #[test]
     fn parse_uptime_data() {
-        let mut data = UptimeData::new();
+        let mut data = UptimeData::new("");
         data.push("13.52 50.34");
         assert_eq!(data.wall_clock_uptime,
                    vec![Duration::new(13, 520_000_000)]);
@@ -111,32 +88,25 @@ mod tests {
                    vec![Duration::new(50, 340_000_000)]);
         assert_eq!(data.len(), 1);
     }
-    
-    /// Check that initializing a sampler works
-    #[test]
-    fn init_sampler() {
-        let uptime = UptimeSampler::new()
-                                   .expect("Failed to create uptime sampler");
-        assert_eq!(uptime.samples.len(), 0);
-    }
 
-    /// Test that basic sampling works as expected
+    /// Check that the sampler works well
+    define_sampler_tests!{ UptimeSampler }
+
+    /// Check that the sampled uptime increases over time
     #[test]
-    fn basic_sampling() {
+    fn increasing_uptime() {
         // Create an uptime sampler
-        let mut uptime =
-            UptimeSampler::new().expect("Failed to create uptime sampler");
+        let mut uptime = UptimeSampler::new()
+                                       .expect("Failed to create a sampler");
 
         // Acquire a first sample
         uptime.sample().expect("Failed to sample uptime once");
-        assert_eq!(uptime.samples.len(), 1);
 
         // Wait a bit
         thread::sleep(Duration::from_millis(50));
 
         // Acquire another sample
         uptime.sample().expect("Failed to sample uptime twice");
-        assert_eq!(uptime.samples.len(), 2);
 
         // The uptime and idle time should have increased
         assert!(uptime.samples.wall_clock_uptime[1] >
@@ -153,30 +123,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use ::reader::ProcFileReader;
-    use super::UptimeSampler;
-    use testbench;
-
-    /// Benchmark for the raw uptime readout overhead
-    #[test]
-    #[ignore]
-    fn readout_overhead() {
-        let mut reader =
-            ProcFileReader::open("/proc/uptime")
-                           .expect("Failed to access uptime");
-        testbench::benchmark(3_000_000, || {
-            reader.sample(|_| {}).expect("Failed to sample uptime");
-        });
-    }
-
-    /// Benchmark for the full uptime sampling overhead
-    #[test]
-    #[ignore]
-    fn sampling_overhead() {
-        let mut uptime =
-            UptimeSampler::new().expect("Failed to create uptime sampler");
-        testbench::benchmark(3_000_000, || {
-            uptime.sample().expect("Failed to sample uptime");
-        });
-    }
+    define_sampler_benchs!{ super::UptimeSampler,
+                            "/proc/uptime",
+                            3_000_000 }
 }

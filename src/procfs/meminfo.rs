@@ -1,40 +1,12 @@
 //! This module contains a sampling parser for /proc/meminfo
 
-use ::reader::ProcFileReader;
+use ::sampler::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use bytesize::ByteSize;
 use std::io::Result;
 
-
-/// Mechanism for sampling measurements from /proc/meminfo
-pub struct MemInfoSampler {
-    /// Reader object for /proc/stat
-    reader: ProcFileReader,
-
-    /// Sampled statistical data
-    samples: MemInfoData,
-}
-//
-impl MemInfoSampler {
-    /// Create a new sampler of /proc/meminfo
-    pub fn new() -> Result<Self> {
-        let mut reader = ProcFileReader::open("/proc/meminfo")?;
-        let mut first_readout = String::new();
-        reader.sample(|file_contents| first_readout.push_str(file_contents))?;
-        Ok(
-            Self {
-                reader,
-                samples: MemInfoData::new(&first_readout),
-            }
-        )
-    }
-
-    /// Acquire a new sample of memory information data
-    pub fn sample(&mut self) -> Result<()> {
-        let samples = &mut self.samples;
-        self.reader.sample(|file_contents: &str| samples.push(file_contents))
-    }
-}
+// Implement a sampler for /proc/meminfo using MemInfoData for parsing & storage
+define_sampler!{ MemInfoSampler : "/proc/meminfo" => MemInfoData }
 
 
 /// Data samples from /proc/meminfo, in structure-of-array layout
@@ -57,7 +29,7 @@ struct MemInfoData {
     keys: Vec<String>,
 }
 //
-impl MemInfoData {
+impl PseudoFileParser for MemInfoData {
     /// Create a new memory info data store, using a first sample to know the
     /// structure of /proc/meminfo on this system
     fn new(initial_contents: &str) -> Self {
@@ -242,7 +214,7 @@ impl MemInfoRecord {
 #[cfg(test)]
 mod tests {
     use ::splitter::split_line_and_run;
-    use super::{ByteSize, MemInfoData, MemInfoRecord, MemInfoSampler};
+    use super::{ByteSize, MemInfoData, MemInfoRecord, PseudoFileParser};
 
     /// Check that meminfo record initialization works well
     #[test]
@@ -345,26 +317,8 @@ mod tests {
         assert_eq!(expected.len(), 1);
     }
 
-    /// Check that sampler initialization works well
-    #[test]
-    fn init_sampler() {
-        let stats =
-            MemInfoSampler::new()
-                           .expect("Failed to create a /proc/meminfo sampler");
-        assert_eq!(stats.samples.len(), 0);
-    }
-
-    /// Check that basic sampling works as expected
-    #[test]
-    fn basic_sampling() {
-        let mut stats =
-            MemInfoSampler::new()
-                           .expect("Failed to create a /proc/meminfo sampler");
-        stats.sample().expect("Failed to sample meminfo once");
-        assert_eq!(stats.samples.len(), 1);
-        stats.sample().expect("Failed to sample meminfo twice");
-        assert_eq!(stats.samples.len(), 2);
-    }
+    /// Check that the sampler works well
+    define_sampler_tests!{ super::MemInfoSampler }
 
     /// INTERNAL: Build a MemInfoRecord using columns from a certain string
     fn build_record(input: &str) -> MemInfoRecord {
@@ -379,31 +333,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    use ::reader::ProcFileReader;
-    use super::MemInfoSampler;
-    use testbench;
-
-    /// Benchmark for the raw meminfo readout overhead
-    #[test]
-    #[ignore]
-    fn readout_overhead() {
-        let mut reader =
-            ProcFileReader::open("/proc/meminfo")
-                           .expect("Failed to open memory info");
-        testbench::benchmark(500_000, || {
-            reader.sample(|_| {}).expect("Failed to read memory info");
-        });
-    }
-
-    /// Benchmark for the full meminfo sampling overhead
-    #[test]
-    #[ignore]
-    fn sampling_overhead() {
-        let mut stat =
-            MemInfoSampler::new()
-                           .expect("Failed to create a memory info sampler");
-        testbench::benchmark(500_000, || {
-            stat.sample().expect("Failed to sample memory info");
-        });
-    }
+    define_sampler_benchs!{ super::MemInfoSampler,
+                            "/proc/meminfo",
+                            500_000 }
 }

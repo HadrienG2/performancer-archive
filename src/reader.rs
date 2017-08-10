@@ -62,17 +62,21 @@ impl ProcFileReader {
     /// somewhere. So the only possible errors are logic errors in the parser
     /// and major system issues such as OOM, for which panicking is fine.
     ///
-    pub fn sample<F: FnMut(&str)>(&mut self, mut parser: F) -> Result<()> {
+    pub fn sample<F, R>(&mut self, mut parser: F) -> Result<R>
+        where F: FnMut(&str) -> R
+    {
         // Read the current contents of the file
         self.file_handle.read_to_string(&mut self.readout_buffer)?;
 
         // Run the user-provided parser on the file contents
-        parser(&self.readout_buffer);
+        let result = parser(&self.readout_buffer);
 
         // Reset the reader state to prepare for the next sample
         self.readout_buffer.clear();
         self.file_handle.seek(SeekFrom::Start(0u64))?;
-        Ok(())
+
+        // Return the parser's results
+        Ok(result)
     }
 }
 
