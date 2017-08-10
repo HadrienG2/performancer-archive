@@ -19,10 +19,11 @@ impl UptimeSampler {
     /// Create a new sampler of /proc/uptime
     pub fn new() -> Result<Self> {
         let reader = ProcFileReader::open("/proc/uptime")?;
+        let samples = UptimeData::new();
         Ok(
             Self {
                 reader,
-                samples: UptimeData::new(),
+                samples,
             }
         )
     }

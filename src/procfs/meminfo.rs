@@ -19,12 +19,11 @@ impl MemInfoSampler {
     /// Create a new sampler of /proc/meminfo
     pub fn new() -> Result<Self> {
         let mut reader = ProcFileReader::open("/proc/meminfo")?;
-        let mut first_readout = String::new();
-        reader.sample(|file_contents| first_readout.push_str(file_contents))?;
+        let samples = reader.sample(|contents| MemInfoData::new(contents))?;
         Ok(
             Self {
                 reader,
-                samples: MemInfoData::new(&first_readout),
+                samples,
             }
         )
     }
@@ -32,7 +31,7 @@ impl MemInfoSampler {
     /// Acquire a new sample of memory information data
     pub fn sample(&mut self) -> Result<()> {
         let samples = &mut self.samples;
-        self.reader.sample(|file_contents: &str| samples.push(file_contents))
+        self.reader.sample(|contents: &str| samples.push(contents))
     }
 }
 
