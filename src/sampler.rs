@@ -120,6 +120,9 @@ macro_rules! define_sampler_tests {
 /// This macro should be invoked inside of the module associated with the
 /// benchmarks for a certain pseudo-file.
 ///
+/// The macro parameters are the sampler type, the path to the associated
+/// pseudo-file, and the number of benchmark iterations to be carried out.
+///
 macro_rules! define_sampler_benchs {
     ($sampler:ty, $file_location:expr, $bench_iters:expr) => {
         use ::reader::ProcFileReader;
