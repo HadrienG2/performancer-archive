@@ -1,7 +1,8 @@
 ///! This module contains a sampling parser for /proc/diskstats
 
+use ::procfs::version::LINUX_VERSION;
 use ::sampler::PseudoFileParser;
-use ::splitter::SplitColumns;
+use ::splitter::{SplitColumns, SplitLinesBySpace};
 use std::time::Duration;
 
 
@@ -28,8 +29,49 @@ impl PseudoFileParser for DiskStatsData {
     /// Create a new disk stats data store, using a first sample to know the
     /// structure of /proc/diskstats on this system
     fn new(initial_contents: &str) -> Self {
-        // TODO
-        unimplemented!()
+        // We only support the disktats format introduced by Linux 2.6.25, where
+        // detailed statistics are provided for both disks and partitions
+        assert!(LINUX_VERSION.greater_eq(2, 6, 25),
+                "Unsupported diskstats format, please use Linux >= 2.6.25");
+
+        // Our data store will eventually go there
+        let mut data = Self {
+            records: Vec::new(),
+            device_numbers: Vec::new(),
+            device_names: Vec::new(),
+        };
+
+        // For each line of the initial content of /proc/diskstats...
+        let mut lines = SplitLinesBySpace::new(initial_contents);
+        while let Some(mut columns) = lines.next() {
+            // Extract the major device number
+            let major = columns.next()
+                               .expect("Major device number is missing")
+                               .parse::<u32>()
+                               .expect("Failed to parse major device number");
+
+            // Extract the minor device number
+            let minor = columns.next()
+                               .expect("Minor device number is missing")
+                               .parse::<u32>()
+                               .expect("Failed to parse minor device number");
+
+            // Extract the device name
+            let name = columns.next()
+                              .expect("Device name is missing")
+                              .to_owned();
+
+            // Build a record associated with this block device
+            let record = DiskStatsRecord::new(columns);
+
+            // Memorize the record and its keys in our data store
+            data.records.push(record);
+            data.device_numbers.push(DeviceNumbers::new(major, minor));
+            data.device_names.push(name);
+        }
+
+        // Return our data collection setup
+        data
     }
 
     /// Parse the contents of /proc/diskstats and add a data sample to all
@@ -140,13 +182,13 @@ enum DiskStatsRecord {
 //
 impl DiskStatsRecord {
     /// Create a new record
-    fn new(raw_data: &mut SplitColumns) -> Self {
+    fn new(mut raw_data: SplitColumns) -> Self {
         // TODO
         unimplemented!()
     }
 
     /// Push new data inside of the record
-    fn push(&mut self, raw_data: &mut SplitColumns) {
+    fn push(&mut self, mut raw_data: SplitColumns) {
         // TODO
         unimplemented!()
     }
