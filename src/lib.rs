@@ -8,9 +8,10 @@
 //! high rate (up to 1 kHz) and with low CPU overhead (down to 0.1%), for the
 //! purpose of performance analysis.
 
+#[macro_use] extern crate lazy_static;
+
 extern crate bytesize;
 extern crate chrono;
-#[macro_use] extern crate lazy_static;
 extern crate libc;
 extern crate regex;
 extern crate testbench;

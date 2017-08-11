@@ -13,7 +13,7 @@
 //!   read is likely to be suitable for the next read.
 //! - One can update their "contents" just by seeking to the beginning.
 //! - Their format is part of the kernel ABI, and is thus expected to only be
-//!   modified through backwards-incompatible extensions.
+//!   modified through backwards-compatible extensions.
 //!
 //! The SamplingReader that is provided in this module is designed to properly
 //! account for these characteristics while reading these pseudo-files.
