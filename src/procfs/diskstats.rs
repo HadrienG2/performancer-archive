@@ -1,9 +1,12 @@
-//! This module contains a sampling parser for /proc/diskstats
+///! This module contains a sampling parser for /proc/diskstats
 
+use ::sampler::PseudoFileParser;
+use ::splitter::SplitColumns;
 use std::time::Duration;
 
 
-// TODO: Mechanism for sampling measurements from /proc/meminfo
+// Implement a /proc/diskstats sampler using DiskStatsData for parsing & storage
+define_sampler!{ DiskStatsSampler : "/proc/diskstats" => DiskStatsData }
 
 
 /// Data samples from /proc/diskstats, in structure-of-array layout
@@ -21,9 +24,33 @@ struct DiskStatsData {
     device_names: Vec<String>,
 }
 //
-// TODO: Implement this
-// TODO: Initially, handle hotplug by detecting structural file changes and
-//       panicking on them. Leave room for future growth.
+impl PseudoFileParser for DiskStatsData {
+    /// Create a new disk stats data store, using a first sample to know the
+    /// structure of /proc/diskstats on this system
+    fn new(initial_contents: &str) -> Self {
+        // TODO
+        unimplemented!()
+    }
+
+    /// Parse the contents of /proc/diskstats and add a data sample to all
+    /// corresponding entries in the internal data store
+    ///
+    /// TODO: Initially, handle hotplug by detecting structural file changes and
+    ///       panicking on them. Leave room for future growth.
+    ///
+    fn push(&mut self, file_contents: &str) {
+        // TODO
+        unimplemented!()
+    }
+
+    /// Tell how many samples are present in the data store, and in debug mode
+    /// check for internal data store consistency
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        // TODO
+        unimplemented!()
+    }
+}
 
 
 /// Sampled records from /proc/diskstats, with a zero-record optimization
@@ -112,13 +139,24 @@ enum DiskStatsRecord {
 }
 //
 impl DiskStatsRecord {
-    // TODO: Create a new record
-    //       fn new(raw_data: &mut SplitLinesBySpace) -> Self {
-    // TODO: Push new data inside of the record
-    //       fn push(&mut self, raw_data: &mut SplitLinesBySpace) {
-    // TODO: Tell how many samples are present in the data store
-    //       #[cfg(test)]
-    //       fn len(&self) -> usize {
+    /// Create a new record
+    fn new(raw_data: &mut SplitColumns) -> Self {
+        // TODO
+        unimplemented!()
+    }
+
+    /// Push new data inside of the record
+    fn push(&mut self, raw_data: &mut SplitColumns) {
+        // TODO
+        unimplemented!()
+    }
+
+    /// Tell how many samples are present in the data store
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        // TODO
+        unimplemented!()
+    }
 }
 
 
@@ -149,11 +187,14 @@ impl DeviceNumbers {
 
 
 // TODO: Unit tests
+// TODO: Including those from define_sampler_tests!
 
 
 /// Performance benchmarks
 ///
 /// See the lib-wide benchmarks module for details on how to use these.
+///
+/// TODO: Switch to define_sampler_benchs! as soon as possible
 ///
 #[cfg(test)]
 mod benchmarks {
