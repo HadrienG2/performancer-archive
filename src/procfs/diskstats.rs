@@ -44,30 +44,15 @@ impl PseudoFileParser for DiskStatsData {
         // For each line of the initial content of /proc/diskstats...
         let mut lines = SplitLinesBySpace::new(initial_contents);
         while let Some(mut columns) = lines.next() {
-            // Extract the major device number
-            let major = columns.next()
-                               .expect("Major device number is missing")
-                               .parse::<u32>()
-                               .expect("Failed to parse major device number");
-
-            // Extract the minor device number
-            let minor = columns.next()
-                               .expect("Minor device number is missing")
-                               .parse::<u32>()
-                               .expect("Failed to parse minor device number");
-
-            // Extract the device name
-            let name = columns.next()
-                              .expect("Device name is missing")
-                              .to_owned();
+            // Extract and memorize the device identifiers
+            {
+                let (numbers, name) = Self::parse_device_ids(&mut columns);
+                data.device_numbers.push(numbers);
+                data.device_names.push(name.to_owned());
+            }
 
             // Build a record associated with this block device
-            let record = DiskStatsRecord::new(columns);
-
-            // Memorize the record and its keys in our data store
-            data.records.push(record);
-            data.device_numbers.push(DeviceNumbers::new(major, minor));
-            data.device_names.push(name);
+            data.records.push(DiskStatsRecord::new(columns));
         }
 
         // Return our data collection setup
@@ -76,21 +61,73 @@ impl PseudoFileParser for DiskStatsData {
 
     /// Parse the contents of /proc/diskstats and add a data sample to all
     /// corresponding entries in the internal data store
-    ///
-    /// TODO: Initially, handle hotplug by detecting structural file changes and
-    ///       panicking on them. Leave room for future growth.
-    ///
     fn push(&mut self, file_contents: &str) {
-        // TODO
-        unimplemented!()
+        // This time, we know how lines of /proc/diskstats should map to members
+        let mut lines = SplitLinesBySpace::new(file_contents);
+        for ((record, numbers), name) in self.records.iter_mut()
+                                             .zip(self.device_numbers.iter())
+                                             .zip(self.device_names.iter()) {
+            // Iterate over lines, checking that each device record which we
+            // observed during initialization is still around (otherwise, an
+            // unsupported hotplug event has occurred).
+            let mut columns = lines.next()
+                                   .expect("A device record has disappeared");
+
+            // Extract and check the device identifiers
+            // (If they don't match, an unsupported hotplug event occurred)
+            {
+                let (numbers2, name2) = Self::parse_device_ids(&mut columns);
+                assert_eq!(*numbers, numbers2, "Device numbers do not match");
+                assert_eq!(name,     name2,    "Device name does not match");
+            }
+
+            // Forward the data to the record associated with this device
+            record.push(columns);
+        }
+
+        // In debug mode, we also check that records did not appear out of blue
+        debug_assert_eq!(lines.next(), None,
+                         "A device record appeared out of nowhere");
     }
 
     /// Tell how many samples are present in the data store, and in debug mode
     /// check for internal data store consistency
     #[cfg(test)]
     fn len(&self) -> usize {
-        // TODO
-        unimplemented!()
+        // We'll return the length of the first record, if any, or else zero
+        let length = self.records.first().map_or(0, |rec| rec.len());
+
+        // In debug mode, check that all records have the same length
+        debug_assert!(self.records.iter().all(|rec| rec.len() == length));
+
+        // Return the number of samples in the data store
+        length
+    }
+}
+//
+impl DiskStatsData {
+    /// Parse the major/minor device numbers and the device name from the
+    /// beginning of a record of /proc/diskstats
+    fn parse_device_ids<'a>(columns: &'a mut SplitColumns) -> (DeviceNumbers,
+                                                               &'a str) {
+        // Extract the major device number
+        let major = columns.next()
+                           .expect("Major device number is missing")
+                           .parse::<u32>()
+                           .expect("Failed to parse major device number");
+
+        // Extract the minor device number
+        let minor = columns.next()
+                           .expect("Minor device number is missing")
+                           .parse::<u32>()
+                           .expect("Failed to parse minor device number");
+
+        // Extract the device name
+        let name = columns.next()
+                          .expect("Device name is missing");
+
+        // Return all these informations
+        (DeviceNumbers::new(major, minor), name)
     }
 }
 
@@ -208,7 +245,7 @@ impl DiskStatsRecord {
 /// instead of 32 bits in order to maximize the odds that this library will
 /// still work under future kernel versions.
 ///
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, PartialEq)]
 struct DeviceNumbers {
     // Major device number, usually (but not always) maps to a kernel driver
     major: u32,
