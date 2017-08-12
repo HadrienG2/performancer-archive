@@ -210,9 +210,6 @@ enum DiskStatsRecord {
         weighted_io_time: Vec<Duration>,
         
         // TODO: Check for unknown fields in the implementation
-        // TODO: Take note of the warning given by the kernel iostats
-        //       documentation concerning kernel versions between 2.4 and 2.6.25
-        //       and partition-specific metadata.
         // TODO: Also take note of the sysfs facility for per-device stats
     },
 }
