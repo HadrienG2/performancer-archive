@@ -8,6 +8,82 @@ use bytesize::ByteSize;
 define_sampler!{ MemInfoSampler : "/proc/meminfo" => MemInfoData }
 
 
+/// Streaming parser for /proc/meminfo
+///
+/// TODO: Decide whether a more extensive description is needed
+///
+struct MemInfoParser {}
+//
+impl MemInfoParser {
+    /// Build a parser, using initial file contents for schema analysis
+    fn new(initial_contents: &str) -> Self {
+        unimplemented!()
+    }
+
+    /// Begin to parse a pseudo-file sample, streaming its data out
+    fn parse<'a>(&mut self, file_contents: &'a str) -> MemInfoStream<'a> {
+        unimplemented!()
+    }
+}
+///
+///
+/// Stream of records from /proc/meminfo
+///
+/// This iterator should yield a stream of memory info records, each featuring
+/// a named counter or data volume.
+///
+struct MemInfoStream<'a> {
+    /// Iterator into the lines and columns of /proc/meminfo
+    file_lines: SplitLinesBySpace<'a>,
+}
+//
+impl<'a> MemInfoStream<'a> {
+    /// Parse the next record from /proc/meminfo
+    fn next<'b>(&'b mut self) -> Option<MemInfoRecordStream<'a, 'b>>
+        where 'a: 'b
+    {
+        unimplemented!()
+    }
+}
+///
+///
+/// Streamed record from /proc/meminfo
+///
+/// This iterator should successively yield...
+///
+/// * A string label identifying this record
+/// * Either a data volume, a counter, or an unsupported data marker
+/// * A None terminator
+///
+struct MemInfoRecordStream<'a, 'b> where 'a: 'b {
+    /// Iterator into the columns of the active record
+    file_columns: SplitColumns<'a, 'b>,
+}
+//
+impl<'a, 'b> MemInfoRecordStream<'a, 'b> {
+    /// Analyze the next field of the meminfo record
+    fn next(&mut self) -> Option<MemInfoRecordField<'a>> {
+        unimplemented!()
+    }
+}
+///
+///
+/// Streamed field from a meminfo record
+enum MemInfoRecordField<'a> {
+    /// Header of the record
+    Header(&'a str),
+
+    /// Data volume
+    DataVolume(ByteSize),
+
+    /// Raw integer counter
+    Counter(u64),
+
+    /// Some payload unsupported by this parser :-(
+    UnsupportedPayload,
+}
+
+
 /// Data samples from /proc/meminfo, in structure-of-array layout
 ///
 /// As /proc/meminfo is just a (large) set of named data volumes with a few
