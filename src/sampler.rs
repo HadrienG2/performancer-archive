@@ -30,6 +30,8 @@
 /// that your parser struct properly implements the PseudoFileParser trait.
 ///
 macro_rules! define_sampler {
+    // Old-style monolithic parser+container type
+    // TODO: Remove this and update documentation
     ($sampler:ident : $file_location:expr => $parser:ty) => {
         // Hopefully the host won't need to import these...
         use ::reader::ProcFileReader;
@@ -61,6 +63,51 @@ macro_rules! define_sampler {
             pub fn sample(&mut self) -> io::Result<()> {
                 let samples = &mut self.samples;
                 self.reader.sample(|contents: &str| samples.push(contents))
+            }
+        }
+    };
+
+    // New-style separate parser and container types
+    ($sampler: ident : $file_location:expr => $parser:ty => $container:ty) => {
+        // Hopefully the host won't need to import these...
+        use ::reader::ProcFileReader;
+        use std::io;
+
+        /// Mechanism for sampling measurements from $file_location
+        pub struct $sampler {
+            /// Reader object for $file_location
+            reader: ProcFileReader,
+
+            /// Streaming parser for $file_location
+            parser: $parser,
+
+            /// Samples of data extracted from $file_location
+            samples: $container
+        }
+        //
+        impl $sampler {
+            /// Create a new sampler for $file_location
+            pub fn new() -> io::Result<Self> {
+                let mut reader = ProcFileReader::open($file_location)?;
+                let parser = reader.sample(|initial| <$parser>::new(initial))?;
+                let samples = <$container>::new();
+                Ok(
+                    Self {
+                        reader,
+                        parser,
+                        samples,
+                    }
+                )
+            }
+
+            /// Acquire a new sample of data from $file_location
+            pub fn sample(&mut self) -> io::Result<()> {
+                let parser = &mut self.parser;
+                let samples = &mut self.samples;
+                self.reader.sample(|file| {
+                    let stream = parser.parse(file);
+                    samples.push(stream);
+                })
             }
         }
     };

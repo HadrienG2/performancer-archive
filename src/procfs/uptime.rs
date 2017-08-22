@@ -1,12 +1,69 @@
 //! This module contains a sampling parser for /proc/uptime
 
 use ::procfs;
-use ::sampler::PseudoFileParser;
+use std::str::SplitWhitespace;
 use std::time::Duration;
 
 
-// Implement a sampler for /proc/uptime using UptimeData for parsing & storage
-define_sampler!{ UptimeSampler : "/proc/uptime" => UptimeData }
+// Implement a sampler for /proc/uptime
+define_sampler!{ UptimeSampler : "/proc/uptime" => UptimeParser
+                                                => UptimeData }
+
+
+/// Streaming parser for /proc/uptime
+///
+/// TODO: Replace following paragraph with a real description once ready
+///
+/// This is an experiment towards a parser redesign that would decouple the
+/// code used for parsing pseudo-file contents from the code used for storing
+/// it. The goal is to determine if this would be practical and efficient.
+///
+/// The idea behind having two separate Parser and Stream components is that it
+/// allows the parser to cache long-lived metadata about the file being parsed.
+///
+struct UptimeParser {}
+//
+impl UptimeParser {
+    /// Build a parser, using initial file contents for schema analysis
+    fn new(initial_contents: &str) -> Self {
+        let col_count = initial_contents.split_whitespace().count();
+        assert!(col_count >= 2, "Uptime and idle time should be present");
+        debug_assert_eq!(col_count, 2, "Unsupported entry in /proc/uptime");
+        Self {}
+    }
+
+    /// Begin to parse a pseudo-file sample, streaming its data out
+    fn parse<'a>(&mut self, file_contents: &'a str) -> UptimeStream<'a> {
+        UptimeStream {
+            file_columns: file_contents.split_whitespace(),
+        }
+    }
+}
+///
+///
+/// Stream of parsed data from /proc/uptime
+///
+/// TODO: Compare and contrast the "streaming reader" approach from vitalyd,
+///       where values are lazily rather than eagerly produced.
+///
+/// This iterator should successively yield...
+///
+/// * The machine uptime (wall clock time elapsed since boot)
+/// * The idle time (total CPU time spent in the idle state)
+/// * A None terminator
+///
+struct UptimeStream<'a> {
+    /// Extracted columns from /proc/uptime
+    file_columns: SplitWhitespace<'a>,
+}
+//
+impl<'a> UptimeStream<'a> {
+    /// Parse the next duration from /proc/uptime
+    fn next(&mut self) -> Option<Duration> {
+        self.file_columns.next()
+                         .map(|column| procfs::parse_duration_secs(column))
+    }
+}
 
 
 /// Data samples from /proc/uptime, in structure-of-array layout
@@ -18,36 +75,29 @@ struct UptimeData {
     cpu_idle_time: Vec<Duration>,
 }
 //
-impl PseudoFileParser for UptimeData {
+impl UptimeData {
     /// Create a new uptime data store
-    fn new(initial_contents: &str) -> Self {
-        debug_assert_eq!(initial_contents.split_whitespace().count(), 2,
-                         "Unsupported entry found in /proc/uptime");
+    fn new() -> Self {
         Self {
             wall_clock_uptime: Vec::new(),
             cpu_idle_time: Vec::new(),
         }
     }
 
-    /// Parse a sample from /proc/uptime and add it to the internal data store
-    fn push(&mut self, file_contents: &str) {
-        // Load machine uptime and idle time
-        let mut numbers_iter = file_contents.split_whitespace();
+    /// Push a new stream of parsed data from /proc/uptime into the store
+    fn push(&mut self, mut stream: UptimeStream) {
+        // Start parsing our input data sample
         self.wall_clock_uptime.push(
-            procfs::parse_duration_secs(
-                numbers_iter.next().expect("Machine uptime is missing")
-            )
+            stream.next().expect("Machine uptime is missing")
         );
         self.cpu_idle_time.push(
-            procfs::parse_duration_secs(
-                numbers_iter.next().expect("Machine idle time is missing")
-            )
+            stream.next().expect("Machine idle time is missing")
         );
 
         // If this debug assert fails, the contents of the file have been
-        // extended by a kernel revision, and the parser should be updated
-        debug_assert!(numbers_iter.next().is_none(),
-                      "Unsupported entry found in /proc/uptime");
+        // extended by a kernel revision, and the code should be updated
+        debug_assert_eq!(stream.next(), None,
+                         "Unsupported entry in /proc/uptime");
     }
 
     /// Tell how many samples are present in the data store
@@ -65,12 +115,28 @@ impl PseudoFileParser for UptimeData {
 mod tests {
     use std::thread;
     use std::time::Duration;
-    use super::{PseudoFileParser, UptimeData, UptimeSampler};
+    use super::{UptimeData, UptimeParser, UptimeSampler};
+
+    /// Check that creating un uptime parser works
+    #[test]
+    fn init_parser() {
+        let _ = UptimeParser::new("56.78 12.34");
+    }
+
+    /// Check that parsing uptime data works
+    #[test]
+    fn parse_data() {
+        let mut parser = UptimeParser::new("10.11 12.13");
+        let mut stream = parser.parse("13.52  50.34");
+        assert_eq!(stream.next(), Some(Duration::new(13, 520_000_000)));
+        assert_eq!(stream.next(), Some(Duration::new(50, 340_000_000)));
+        assert_eq!(stream.next(), None);
+    }
 
     /// Check that creating an uptime data store works
     #[test]
-    fn init_uptime_data() {
-        let data = UptimeData::new("56.78 12.34");
+    fn init_container() {
+        let data = UptimeData::new();
         assert_eq!(data.wall_clock_uptime.len(), 0);
         assert_eq!(data.cpu_idle_time.len(), 0);
         assert_eq!(data.len(), 0);
@@ -78,13 +144,14 @@ mod tests {
 
     /// Check that parsing uptime data works
     #[test]
-    fn parse_uptime_data() {
-        let mut data = UptimeData::new("10.11 12.13");
-        data.push("13.52 50.34");
+    fn push_data() {
+        let mut parser = UptimeParser::new("145.16 16546.1469");
+        let mut data = UptimeData::new();
+        data.push(parser.parse("614.461  10645.163"));
         assert_eq!(data.wall_clock_uptime,
-                   vec![Duration::new(13, 520_000_000)]);
+                   vec![Duration::new(614, 461_000_000)]);
         assert_eq!(data.cpu_idle_time,
-                   vec![Duration::new(50, 340_000_000)]);
+                   vec![Duration::new(10645, 163_000_000)]);
         assert_eq!(data.len(), 1);
     }
 
