@@ -12,17 +12,20 @@ define_sampler!{ MemInfoSampler : "/proc/meminfo" => MemInfoData }
 ///
 /// TODO: Decide whether a more extensive description is needed
 ///
-struct MemInfoParser {}
+#[derive(Debug, PartialEq)]
+pub struct MemInfoParser {}
 //
 impl MemInfoParser {
     /// Build a parser, using initial file contents for schema analysis
-    fn new(initial_contents: &str) -> Self {
-        unimplemented!()
+    pub fn new(_initial_contents: &str) -> Self {
+        Self {}
     }
 
     /// Begin to parse a pseudo-file sample, streaming its data out
-    fn parse<'a>(&mut self, file_contents: &'a str) -> MemInfoStream<'a> {
-        unimplemented!()
+    pub fn parse<'a>(&mut self, file_contents: &'a str) -> MemInfoStream<'a> {
+        MemInfoStream {
+            file_lines: SplitLinesBySpace::new(file_contents),
+        }
     }
 }
 ///
@@ -32,17 +35,22 @@ impl MemInfoParser {
 /// This iterator should yield a stream of memory info records, each featuring
 /// a named counter or data volume.
 ///
-struct MemInfoStream<'a> {
+pub struct MemInfoStream<'a> {
     /// Iterator into the lines and columns of /proc/meminfo
     file_lines: SplitLinesBySpace<'a>,
 }
 //
 impl<'a> MemInfoStream<'a> {
     /// Parse the next record from /proc/meminfo
-    fn next<'b>(&'b mut self) -> Option<MemInfoRecordStream<'a, 'b>>
+    pub fn next<'b>(&'b mut self) -> Option<MemInfoRecordStream<'a, 'b>>
         where 'a: 'b
     {
-        unimplemented!()
+        self.file_lines.next().map(|file_columns| {
+            MemInfoRecordStream {
+                file_columns,
+                state: MemInfoRecordState::AtLabel,
+            }
+        })
     }
 }
 ///
@@ -55,24 +63,100 @@ impl<'a> MemInfoStream<'a> {
 /// * Either a data volume, a counter, or an unsupported data marker
 /// * A None terminator
 ///
-struct MemInfoRecordStream<'a, 'b> where 'a: 'b {
+pub struct MemInfoRecordStream<'a, 'b> where 'a: 'b {
     /// Iterator into the columns of the active record
     file_columns: SplitColumns<'a, 'b>,
+
+    /// State of the meminfo record iterator
+    state: MemInfoRecordState,
 }
 //
 impl<'a, 'b> MemInfoRecordStream<'a, 'b> {
     /// Analyze the next field of the meminfo record
-    fn next(&mut self) -> Option<MemInfoRecordField<'a>> {
-        unimplemented!()
+    pub fn next(&mut self) -> Option<MemInfoRecordField<'a>> {
+        match self.state {
+            // This is the textual label of the record
+            MemInfoRecordState::AtLabel => {
+                self.state = MemInfoRecordState::AtPayload;
+                self.parse_label().map(MemInfoRecordField::Label)
+            }
+
+            // This is the payload of the record (quantity being measured)
+            MemInfoRecordState::AtPayload => {
+                self.state = MemInfoRecordState::AtEnd;
+                self.parse_payload().map(MemInfoRecordField::Payload)
+            }
+
+            // This is the end of the record
+            MemInfoRecordState::AtEnd => None,
+        }
+    }
+
+    /// Parse a meminfo record's label
+    fn parse_label(&mut self) -> Option<&'a str> {
+        self.file_columns.next().map(|label| {
+            // The label of a meminfo record should end with a trailing colon
+            assert_eq!(label.chars().next_back(), Some(':'),
+                       "Invalid meminfo label terminator");
+
+            // We will not include that colon in the final output
+            &label[..label.len()-1]
+        })
+    }
+
+    /// Parse a meminfo record's payload
+    fn parse_payload(&mut self) -> Option<MemInfoRecordPayload> {
+        self.file_columns.next().map(|counter_str| {
+            let counter_res = counter_str.parse::<u64>();
+            match (counter_res, self.file_columns.next()) {
+                // This is a data volume in kibibytes (with a wrong unit :()
+                (Ok(counter), Some("kB")) => {
+                    debug_assert_eq!(self.file_columns.next(), None);
+                    let volume = counter as usize;
+                    MemInfoRecordPayload::DataVolume(ByteSize::kib(volume))
+                },
+
+                // This is a raw counter without particular semantics
+                (Ok(counter), None) => MemInfoRecordPayload::Counter(counter),
+
+                // This is something which we don't know how to parse
+                _ => MemInfoRecordPayload::Unsupported
+            }
+        })
     }
 }
 ///
-///
 /// Streamed field from a meminfo record
-enum MemInfoRecordField<'a> {
-    /// Header of the record
-    Header(&'a str),
+pub enum MemInfoRecordField<'a> {
+    /// Textual label of the record
+    Label(&'a str),
 
+    /// Payload of the record
+    Payload(MemInfoRecordPayload),
+}
+//
+impl<'a> MemInfoRecordField<'a> {
+    /// Assert that this field should be a label
+    pub fn as_label(self) -> &'a str {
+        if let MemInfoRecordField::Label(label) = self {
+            label
+        } else {
+            panic!("Misinterpreted meminfo record as a label");
+        }
+    }
+
+    /// Assert that this field should be a payload
+    pub fn as_payload(self) -> MemInfoRecordPayload {
+        if let MemInfoRecordField::Payload(payload) = self {
+            payload
+        } else {
+            panic!("Misinterpreted meminfo record as a payload");
+        }
+    }
+}
+///
+/// Payload of a meminfo record
+pub enum MemInfoRecordPayload {
     /// Data volume
     DataVolume(ByteSize),
 
@@ -80,8 +164,11 @@ enum MemInfoRecordField<'a> {
     Counter(u64),
 
     /// Some payload unsupported by this parser :-(
-    UnsupportedPayload,
+    Unsupported,
 }
+///
+/// State of a meminfo record streamer
+enum MemInfoRecordState { AtLabel, AtPayload, AtEnd }
 
 
 /// Data samples from /proc/meminfo, in structure-of-array layout
@@ -97,11 +184,15 @@ enum MemInfoRecordField<'a> {
 ///
 #[derive(Debug, PartialEq)]
 struct MemInfoData {
-    /// Sampled meminfo records, in the order in which they appear in the file
-    records: Vec<MemInfoRecord>,
+    /// Sampled meminfo payloads, in the order in which it appears in the file
+    data: Vec<MemInfoPayloads>,
 
     /// Keys associated with each record, again in file order
     keys: Vec<String>,
+
+    /// New-style meminfo parser
+    /// TODO: Just a check that it works, move to new-style sampler after that
+    parser: MemInfoParser,
 }
 //
 impl PseudoFileParser for MemInfoData {
@@ -109,67 +200,65 @@ impl PseudoFileParser for MemInfoData {
     /// structure of /proc/meminfo on this system
     fn new(initial_contents: &str) -> Self {
         // Our data store will eventually go there
-        let mut data = Self {
-            records: Vec::new(),
+        let mut store = Self {
+            data: Vec::new(),
             keys: Vec::new(),
+            parser: MemInfoParser::new(initial_contents),
         };
 
-        // For each line of the initial content of /proc/meminfo...
-        let mut lines = SplitLinesBySpace::new(initial_contents);
-        while let Some(mut columns) = lines.next() {
-            // ...and check that the header has the expected format. It should
-            // consist of a non-empty string key, followed by a colon, which we
-            // shall get rid of along the way.
-            let mut header = columns.next()
-                                    .expect("Unexpected empty line")
-                                    .to_owned();
-            assert_eq!(header.pop(), Some(':'),
-                       "Headers from meminfo should end with a colon");
+        // For initial record of /proc/meminfo...
+        let mut stream = store.parser.parse(initial_contents);
+        while let Some(mut record) = stream.next() {
+            // Fetch the record's label
+            let label_field = record.next().expect("Missing meminfo label");
+            let label = label_field.as_label();
 
-            // Build a record for this line of /proc/meminfo
-            let record = MemInfoRecord::new(columns);
+            // Build storage for the associated quantity (data volume/counter)
+            let payload_field = record.next().expect("Missing meminfo data");
+            let data = MemInfoPayloads::new(payload_field.as_payload());
 
             // Report unsupported records in debug mode
-            debug_assert!(record != MemInfoRecord::Unsupported(0),
+            debug_assert!(data != MemInfoPayloads::Unsupported(0),
                           "Missing support for a meminfo record named {}",
-                          header);
+                          label);
 
             // Memorize the record and its key in our data store
-            data.records.push(record);
-            data.keys.push(header);
+            store.data.push(data);
+            store.keys.push(label.to_owned());
         }
 
         // Return our data collection setup
-        data
+        store
     }
 
     /// Parse the contents of /proc/meminfo and add a data sample to all
     /// corresponding entries in the internal data store
     fn push(&mut self, file_contents: &str) {
         // This time, we know how lines of /proc/meminfo map to our members
-        let mut lines = SplitLinesBySpace::new(file_contents);
-        for (record, key) in self.records.iter_mut().zip(self.keys.iter()) {
-            // We start by iterating over lines and checking that each line
+        let mut stream = self.parser.parse(file_contents);
+        for (data, key) in self.data.iter_mut().zip(self.keys.iter()) {
+            // We start by iterating over records and checking that each record
             // that we observed during initialization is still around
-            let mut columns = lines.next()
+            let mut record = stream.next()
                                    .expect("A meminfo record has disappeared");
-            let header = columns.next().expect("Unexpected empty line");
+            let label = record.next().expect("Missing meminfo label")
+                              .as_label();
 
             // In release mode, we use the length of the header as a checksum
             // to make sure that the internal structure did not change during
             // sampling. In debug mode, we fully check the header.
-            assert_eq!(header.len()-1, key.len(),
+            assert_eq!(label.len(), key.len(),
                        "Unsupported structural meminfo change during sampling");
-            debug_assert_eq!(&header[..header.len()-1], key,
+            debug_assert_eq!(label, key,
                              "Unsupported meminfo change during sampling");
 
             // Forward the data to the appropriate parser
-            record.push(columns);
+            data.push(record.file_columns);
         }
 
         // In debug mode, we also check that records did not appear out of blue
-        debug_assert_eq!(lines.next(), None,
-                         "A meminfo record appeared out of nowhere");
+        debug_assert!(stream.next().is_none(),
+                      "A meminfo record appeared out of nowhere");
     }
 
     /// Tell how many samples are present in the data store, and in debug mode
@@ -177,10 +266,10 @@ impl PseudoFileParser for MemInfoData {
     #[cfg(test)]
     fn len(&self) -> usize {
         // We'll return the length of the first record, if any, or else zero
-        let length = self.records.first().map_or(0, |rec| rec.len());
+        let length = self.data.first().map_or(0, |rec| rec.len());
 
         // In debug mode, check that all records have the same length
-        debug_assert!(self.records.iter().all(|rec| rec.len() == length));
+        debug_assert!(self.data.iter().all(|rec| rec.len() == length));
 
         // Return the number of samples in the data store
         length
@@ -190,7 +279,7 @@ impl PseudoFileParser for MemInfoData {
 
 /// Sampled records from /proc/meminfo, which can measure different things:
 #[derive(Debug, PartialEq)]
-enum MemInfoRecord {
+enum MemInfoPayloads {
     /// A volume of data
     DataVolume(Vec<ByteSize>),
 
@@ -205,29 +294,24 @@ enum MemInfoRecord {
     Unsupported(usize),
 }
 //
-impl MemInfoRecord {
+impl MemInfoPayloads {
     /// Create a new record, choosing the type based on some raw data
-    fn new(mut raw_data: SplitColumns) -> Self {
-        // The raw data should start with a numerical field. Make sure that we
-        // can parse it. Otherwise, we don't support the associated content.
-        let number_parse_result = raw_data.next()
-                                          .expect("Unexpected blank record")
-                                          .parse::<u64>();
-
-        // The number may or may not come with a suffix which clarifies its
-        // semantics: is it just a raw counter, or some volume of data?
-        match (number_parse_result, raw_data.next()) {
-            // It's a volume of data (in KiB, don't trust the kernel's units...)
-            (Ok(_), Some("kB")) => {
-                debug_assert_eq!(raw_data.next(), None);
-                MemInfoRecord::DataVolume(Vec::new())
+    fn new(raw_data: MemInfoRecordPayload) -> Self {
+        match raw_data {
+            // Parser yielded a volume of data
+            MemInfoRecordPayload::DataVolume(_) => {
+                MemInfoPayloads::DataVolume(Vec::new())
             },
 
-            // It's a raw counter without any special semantics attached to it
-            (Ok(_), None) => MemInfoRecord::Counter(Vec::new()),
+            // Parser yielded a raw counter without special semantics
+            MemInfoRecordPayload::Counter(_) => {
+                MemInfoPayloads::Counter(Vec::new())
+            },
 
-            // It's something we don't know how to parse
-            _ => MemInfoRecord::Unsupported(0),
+            // Parser failed to recognize the inner data type
+            MemInfoRecordPayload::Unsupported => {
+                MemInfoPayloads::Unsupported(0)
+            },
         }
     }
 
@@ -236,7 +320,7 @@ impl MemInfoRecord {
         // Use our knowledge from the first parse to tell what this should be
         match *self {
             // A data volume in kibibytes
-            MemInfoRecord::DataVolume(ref mut v) => {
+            MemInfoPayloads::DataVolume(ref mut v) => {
                 // Parse and record the data volume
                 let data_volume = ByteSize::kib(
                     raw_data.next().expect("Unexpected empty record")
@@ -250,7 +334,7 @@ impl MemInfoRecord {
             },
 
             // A raw counter
-            MemInfoRecord::Counter(ref mut v) => {
+            MemInfoPayloads::Counter(ref mut v) => {
                 // Parse and record the counter's value
                 v.push(raw_data.next().expect("Unexpected empty record")
                                .parse().expect("Failed to parse counter"));
@@ -260,7 +344,7 @@ impl MemInfoRecord {
             },
 
             // Something unknown and mysterious
-            MemInfoRecord::Unsupported(ref mut count) => {
+            MemInfoPayloads::Unsupported(ref mut count) => {
                 *count += 1;
             },
         }
@@ -277,9 +361,9 @@ impl MemInfoRecord {
     #[cfg(test)]
     fn len(&self) -> usize {
         match *self {
-            MemInfoRecord::DataVolume(ref v)  => v.len(),
-            MemInfoRecord::Counter(ref v)     => v.len(),
-            MemInfoRecord::Unsupported(count) => count,
+            MemInfoPayloads::DataVolume(ref v)  => v.len(),
+            MemInfoPayloads::Counter(ref v)     => v.len(),
+            MemInfoPayloads::Unsupported(count) => count,
         }
     }
 }
@@ -289,24 +373,25 @@ impl MemInfoRecord {
 #[cfg(test)]
 mod tests {
     use ::splitter::split_line_and_run;
-    use super::{ByteSize, MemInfoData, MemInfoRecord, PseudoFileParser};
+    use super::{ByteSize, MemInfoData, MemInfoPayloads, MemInfoRecordStream,
+                MemInfoRecordState, PseudoFileParser};
 
     /// Check that meminfo record initialization works well
     #[test]
     fn init_record() {
         // Data volume record
         let data_vol_record = build_record("42 kB");
-        assert_eq!(data_vol_record, MemInfoRecord::DataVolume(Vec::new()));
+        assert_eq!(data_vol_record, MemInfoPayloads::DataVolume(Vec::new()));
         assert_eq!(data_vol_record.len(), 0);
 
         // Counter record
         let counter_record = build_record("713705");
-        assert_eq!(counter_record, MemInfoRecord::Counter(Vec::new()));
+        assert_eq!(counter_record, MemInfoPayloads::Counter(Vec::new()));
         assert_eq!(counter_record.len(), 0);
 
         // Unsupported record
         let bad_record = build_record("73 MiB");
-        assert_eq!(bad_record, MemInfoRecord::Unsupported(0));
+        assert_eq!(bad_record, MemInfoPayloads::Unsupported(0));
         assert_eq!(bad_record.len(), 0);
     }
 
@@ -317,20 +402,20 @@ mod tests {
         let mut size_record = build_record("24 kB");
         size_record.push_str("512 kB");
         assert_eq!(size_record,
-                   MemInfoRecord::DataVolume(vec![ByteSize::kib(512)]));
+                   MemInfoPayloads::DataVolume(vec![ByteSize::kib(512)]));
         assert_eq!(size_record.len(), 1);
 
         // Counter record
         let mut counter_record = build_record("1337");
         counter_record.push_str("371830");
         assert_eq!(counter_record,
-                   MemInfoRecord::Counter(vec![371830]));
+                   MemInfoPayloads::Counter(vec![371830]));
         assert_eq!(counter_record.len(), 1);
 
         // Unsupported record
         let mut bad_record = build_record("57 TiB");
         bad_record.push_str("332 PiB");
-        assert_eq!(bad_record, MemInfoRecord::Unsupported(1));
+        assert_eq!(bad_record, MemInfoPayloads::Unsupported(1));
         assert_eq!(bad_record.len(), 1);
     }
 
@@ -340,7 +425,7 @@ mod tests {
         // Starting with an empty file (should never happen, but good base case)
         let mut info = String::new();
         let empty_info = MemInfoData::new(&info);
-        assert_eq!(empty_info.records.len(), 0);
+        assert_eq!(empty_info.data.len(), 0);
         assert_eq!(empty_info.keys.len(), 0);
         assert_eq!(empty_info.len(), 0);
         let mut expected = empty_info;
@@ -348,7 +433,7 @@ mod tests {
         // ...adding a first line of memory info...
         info.push_str("MyDataVolume:   1234 kB");
         let single_info = MemInfoData::new(&info);
-        expected.records.push(MemInfoRecord::DataVolume(Vec::new()));
+        expected.data.push(MemInfoPayloads::DataVolume(Vec::new()));
         expected.keys.push("MyDataVolume".to_owned());
         assert_eq!(single_info, expected);
         assert_eq!(expected.len(), 0);
@@ -356,7 +441,7 @@ mod tests {
         // ...and a second line of memory info.
         info.push_str("\nMyCounter:   42");
         let double_info = MemInfoData::new(&info);
-        expected.records.push(MemInfoRecord::Counter(Vec::new()));
+        expected.data.push(MemInfoPayloads::Counter(Vec::new()));
         expected.keys.push("MyCounter".to_owned());
         assert_eq!(double_info, expected);
         assert_eq!(expected.len(), 0);
@@ -377,7 +462,7 @@ mod tests {
         let mut single_info = MemInfoData::new(&info);
         single_info.push(&info);
         expected = MemInfoData::new(&info);
-        expected.records[0].push_str("1234 kB");
+        expected.data[0].push_str("1234 kB");
         assert_eq!(single_info, expected);
         assert_eq!(expected.len(), 1);
 
@@ -386,8 +471,8 @@ mod tests {
         let mut double_info = MemInfoData::new(&info);
         double_info.push(&info);
         expected = MemInfoData::new(&info);
-        expected.records[0].push_str("1234 kB");
-        expected.records[1].push_str("42");
+        expected.data[0].push_str("1234 kB");
+        expected.data[1].push_str("42");
         assert_eq!(double_info, expected);
         assert_eq!(expected.len(), 1);
     }
@@ -395,9 +480,15 @@ mod tests {
     /// Check that the sampler works well
     define_sampler_tests!{ super::MemInfoSampler }
 
-    /// INTERNAL: Build a MemInfoRecord using columns from a certain string
-    fn build_record(input: &str) -> MemInfoRecord {
-        split_line_and_run(input, |columns| MemInfoRecord::new(columns))
+    /// INTERNAL: Build a MemInfoPayloads using columns from a certain string
+    fn build_record(input: &str) -> MemInfoPayloads {
+        split_line_and_run(input, |columns| {
+            let mut stream = MemInfoRecordStream {
+                file_columns: columns,
+                state: MemInfoRecordState::AtPayload,
+            };
+            MemInfoPayloads::new(stream.next().unwrap().as_payload())
+        })
     }
 }
 

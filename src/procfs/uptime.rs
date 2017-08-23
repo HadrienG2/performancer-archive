@@ -77,7 +77,7 @@ struct UptimeData {
 //
 impl UptimeData {
     /// Create a new uptime data store
-    fn new() -> Self {
+    fn new(_stream: UptimeStream) -> Self {
         Self {
             wall_clock_uptime: Vec::new(),
             cpu_idle_time: Vec::new(),
@@ -136,7 +136,9 @@ mod tests {
     /// Check that creating an uptime data store works
     #[test]
     fn init_container() {
-        let data = UptimeData::new();
+        let initial = "16.191963 19686.615";
+        let mut parser = UptimeParser::new(initial);
+        let data = UptimeData::new(parser.parse(initial));
         assert_eq!(data.wall_clock_uptime.len(), 0);
         assert_eq!(data.cpu_idle_time.len(), 0);
         assert_eq!(data.len(), 0);
@@ -145,8 +147,9 @@ mod tests {
     /// Check that parsing uptime data works
     #[test]
     fn push_data() {
-        let mut parser = UptimeParser::new("145.16 16546.1469");
-        let mut data = UptimeData::new();
+        let initial = "145.16 16546.1469";
+        let mut parser = UptimeParser::new(initial);
+        let mut data = UptimeData::new(parser.parse(initial));
         data.push(parser.parse("614.461  10645.163"));
         assert_eq!(data.wall_clock_uptime,
                    vec![Duration::new(614, 461_000_000)]);

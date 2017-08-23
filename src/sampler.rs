@@ -88,9 +88,17 @@ macro_rules! define_sampler {
         impl $sampler {
             /// Create a new sampler for $file_location
             pub fn new() -> io::Result<Self> {
+                // Set up a sampling reader
                 let mut reader = ProcFileReader::open($file_location)?;
-                let parser = reader.sample(|initial| <$parser>::new(initial))?;
-                let samples = <$container>::new();
+
+                // Build parsing and storage infrastructure from a first sample
+                let (parser, samples) = reader.sample(|file| {
+                    let mut parser = <$parser>::new(file);
+                    let samples = <$container>::new(parser.parse(file));
+                    (parser, samples)
+                })?;
+
+                // Return the full sampling setup
                 Ok(
                     Self {
                         reader,
