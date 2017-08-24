@@ -50,7 +50,7 @@ impl<'a> MemInfoStream<'a> {
             MemInfoRecordStream {
                 fused_columns: file_columns.fuse(),
                 last_columns: [None; 2],
-                state: MemInfoRecordState::AtLabel,
+                state: MemInfoRecordState::AtStart,
             }
         })
     }
@@ -63,7 +63,6 @@ impl<'a> MemInfoStream<'a> {
 ///
 /// * A string label, identifying this record
 /// * A payload, which is either a data volume or a counter
-/// * A None terminator
 ///
 /// Unsupported payload formats are detected and reported appropriately
 ///
@@ -86,24 +85,30 @@ impl<'a, 'b> MemInfoRecordStream<'a, 'b> {
     /// appropriate parse_xyz() method in order to parse the freshly received
     /// data into a type that is already known.
     ///
+    /// Since in the case of /proc/meminfo, the number of fields in a record
+    /// is known at compile time, past the end iteration is not supported in
+    /// the interface.
+    ///
     #[inline(always)]
     pub fn next(&mut self) -> &mut Self {
         match self.state {
             // This is the textual label of the record
-            MemInfoRecordState::AtLabel => {
-                self.state = MemInfoRecordState::AtPayload;
-                self.last_columns[0] = self.file_columns.next();
+            MemInfoRecordState::AtStart => {
+                self.state = MemInfoRecordState::AfterLabel;
+                self.last_columns[0] = self.fused_columns.next();
             },
 
             // This is the payload of the record (quantity being measured)
-            MemInfoRecordState::AtPayload => {
-                self.state = MemInfoRecordState::AtEnd;
-                self.last_columns[0] = self.file_columns.next();
-                self.last_columns[1] = self.file_columns.next();
+            MemInfoRecordState::AfterLabel => {
+                self.state = MemInfoRecordState::AfterPayload;
+                self.last_columns[0] = self.fused_columns.next();
+                self.last_columns[1] = self.fused_columns.next();
             },
 
             // This is the end of the record, nothing to do
-            MemInfoRecordState::AtEnd => {},
+            MemInfoRecordState::AfterPayload => {
+                panic!("No record expected after the payload");
+            },
         }
         self
     }
@@ -112,13 +117,13 @@ impl<'a, 'b> MemInfoRecordStream<'a, 'b> {
     pub fn kind(&self) -> MemInfoFieldKind {
         match self.state {
             // No data was loaded yet, this call is mistaken
-            MemInfoRecordState::AtLabel => panic!("Please call next() first"),
+            MemInfoRecordState::AtStart => panic!("Please call next() first"),
 
             // A meminfo record label was just loaded
-            MemInfoRecordState::AtPayload => MemInfoFieldKind::Label,
+            MemInfoRecordState::AfterLabel => MemInfoFieldKind::Label,
 
             // A payload was just loaded. Let's determine what kind of payload.
-            MemInfoRecordState::AtEnd => {
+            MemInfoRecordState::AfterPayload => {
                 match (self.last_columns[0], self.last_columns[1]) {
                     (Some(_), Some("kB")) => MemInfoFieldKind::DataVolume,
                     (Some(_), None)       => MemInfoFieldKind::Counter,
@@ -149,15 +154,15 @@ impl<'a, 'b> MemInfoRecordStream<'a, 'b> {
         let kibs_str_opt = self.last_columns[0].take();
         let unit_opt     = self.last_columns[1].take();
 
-        // Parse data volume, which is in kibibytes (no matter what kernel says)
+        // Parse data volume, which is in kibibytes (no matter what Linux says)
         let data_volume = ByteSize::kib(
             kibs_str_opt.expect("No input value. Did you call next()?")
                         .parse::<usize>()
                         .expect("Could not parse data volume as an integer")
         );
 
-        // Check the unit in debug mode, just in case we got it all wrong
-        debug_assert_eq!(unit_opt, Some("kB"));
+        // Make sure that the unit is correct
+        assert_eq!(unit_opt, Some("kB"));
 
         // Return the parsed data volume to our caller
         data_volume
@@ -175,8 +180,8 @@ impl<'a, 'b> MemInfoRecordStream<'a, 'b> {
                            .parse::<u64>()
                            .expect("Failed to parse the counter's value");
 
-        // In debug mode, check that it truly was a raw counter, with no suffix
-        debug_assert_eq!(should_be_none, None);
+        // Make sure that this truly was a raw counter, with no suffix
+        assert_eq!(should_be_none, None);
 
         // Return the parsed counter value to our client
         counter
@@ -199,7 +204,7 @@ pub enum MemInfoFieldKind {
 }
 ///
 /// State of a meminfo record streamer
-enum MemInfoRecordState { AtLabel, AtPayload, AtEnd }
+enum MemInfoRecordState { AtStart, AfterLabel, AfterPayload }
 
 
 /// Data samples from /proc/meminfo, in structure-of-array layout
