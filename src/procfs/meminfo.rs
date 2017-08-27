@@ -72,7 +72,7 @@ pub struct MemInfoRecordStream<'a, 'b> where 'a: 'b {
 }
 //
 impl<'a, 'b> MemInfoRecordStream<'a, 'b> {
-    /// Read the next field of the meminfo record.
+    /// Read the next field of the meminfo record
     ///
     /// This method is designed so that it can be immediately chained with
     /// kind() in order to analyze what the new field contains, or with the
@@ -85,42 +85,71 @@ impl<'a, 'b> MemInfoRecordStream<'a, 'b> {
     ///
     pub fn fetch(&mut self) -> &mut Self {
         match self.state {
-            // This is the textual label of the record
+            // Fetch the textual label of the record
             MemInfoRecordState::AtStart => {
-                self.state = MemInfoRecordState::AfterLabel;
                 self.last_columns[0] = self.fused_columns.next();
+                self.state = MemInfoRecordState::AtLabel;
             },
 
-            // This is the payload of the record (quantity being measured)
-            MemInfoRecordState::AfterLabel => {
-                self.state = MemInfoRecordState::AfterPayload;
+            // Fetch the payload of the record (quantity being measured)
+            MemInfoRecordState::AtLabel => {
                 self.last_columns[0] = self.fused_columns.next();
                 self.last_columns[1] = self.fused_columns.next();
+                self.state = MemInfoRecordState::AtPayload;
             },
 
-            // This is the end of the record, nothing to do
-            MemInfoRecordState::AfterPayload => {
+            // There should be nothing after the record's payload
+            MemInfoRecordState::AtPayload => {
                 panic!("No record field expected after the payload");
             },
         }
         self
     }
 
-    /// What kind of record field did next() yield? Run this method to find out.
+    /// Analyze the active meminfo record field
+    ///
+    /// Run this method after a fetch() in order to validate your input data
+    /// and eliminate schema ambiguities. Once you know about the contents of a
+    /// certain meminfo record, you can skip this step and go for the
+    /// appropriate parse_xyz method directly for better performance.
+    ///
     pub fn kind(&self) -> MemInfoFieldKind {
         match self.state {
             // No data was loaded yet, this call is mistaken
             MemInfoRecordState::AtStart => panic!("Please call fetch() first"),
 
-            // A meminfo record label was just loaded
-            MemInfoRecordState::AfterLabel => MemInfoFieldKind::Label,
+            // A meminfo record label was just loaded, validate it
+            MemInfoRecordState::AtLabel => {
+                // A valid label (with a trailing colon) should be present
+                let has_valid_label =
+                    self.last_columns[0]
+                        .as_ref()
+                        .map_or(false,
+                                |lbl| lbl.bytes().next_back() == Some(b':'));
 
-            // A payload was just loaded. Let's determine what kind of payload.
-            MemInfoRecordState::AfterPayload => {
-                match (self.last_columns[0], self.last_columns[1]) {
-                    (Some(_), Some("kB")) => MemInfoFieldKind::DataVolume,
-                    (Some(_), None)       => MemInfoFieldKind::Counter,
-                    _                     => MemInfoFieldKind::Unsupported,
+                // Tell whether a valid label was present in the input
+                if has_valid_label {
+                    MemInfoFieldKind::Label
+                } else {
+                    MemInfoFieldKind::Unsupported
+                }
+            },
+
+            // A payload was just loaded, validate it and disambiguate what kind
+            // of payload we're dealing with (data volume or raw counter?)
+            MemInfoRecordState::AtPayload => {
+                // A valid payload should start with a positive integer
+                let has_valid_ctr = self.last_columns[0]
+                                        .as_ref()
+                                        .map_or(false,
+                                                |s| s.parse::<u64>().is_ok());
+
+                // Payload types are further disambiguated by the presence or
+                // absence of a supported unit suffix
+                match (has_valid_ctr, self.last_columns[1]) {
+                    (true, Some("kB")) => MemInfoFieldKind::DataVolume,
+                    (true, None)       => MemInfoFieldKind::Counter,
+                    _                  => MemInfoFieldKind::Unsupported,
                 }
             },
         }
@@ -128,34 +157,32 @@ impl<'a, 'b> MemInfoRecordStream<'a, 'b> {
 
     /// Parse the current meminfo record field as a label
     pub fn parse_label(&mut self) -> &'a str {
-        // Fetch the label for our column buffer (and reset the buffer)
+        // In debug mode, validate that we are indeed on a label
+        debug_assert_eq!(self.kind(), MemInfoFieldKind::Label);
+
+        // Fetch the label from our column buffer (and reset the buffer)
         let label = self.last_columns[0]
                         .take()
                         .expect("No input value. Did you call fetch()?");
 
-        // The label of a meminfo record should end with a trailing colon
-        assert_eq!(label.bytes().next_back(), Some(b':'),
-                   "Invalid meminfo label terminator");
-
-        // We should not include that colon in the final output
+        // Eliminate the trailing colon of the label from our output
         &label[..label.len()-1]
     }
 
     /// Parse the current meminfo record field as a data volume
     pub fn parse_data_volume(&mut self) -> ByteSize {
+        // In debug mode, validate that we are indeed on a data volume
+        debug_assert_eq!(self.kind(), MemInfoFieldKind::DataVolume);
+
         // If we truly are on a data volume, it should be in our buffers
         let kibs_str_opt = self.last_columns[0].take();
-        let unit_opt     = self.last_columns[1].take();
 
         // Parse data volume, which is in kibibytes (no matter what Linux says)
         let data_volume = ByteSize::kib(
             kibs_str_opt.expect("No input value. Did you call fetch()?")
                         .parse::<usize>()
-                        .expect("Could not parse data volume as an integer")
+                        .expect("Could not parse the kibibytes counter.")
         );
-
-        // Make sure that the unit is correct
-        assert_eq!(unit_opt, Some("kB"));
 
         // Return the parsed data volume to our caller
         data_volume
@@ -163,18 +190,17 @@ impl<'a, 'b> MemInfoRecordStream<'a, 'b> {
 
     /// Parse the current meminfo record field as a raw counter
     pub fn parse_counter(&mut self) -> u64 {
+        // In debug mode, validate that we are indeed on a data volume
+        debug_assert_eq!(self.kind(), MemInfoFieldKind::Counter);
+
         // If we truly are on a counter, it should be in our buffers
         let counter_str_opt = self.last_columns[0].take();
-        let should_be_none  = self.last_columns[1].take();
 
         // Parse the counter's value
         let counter =
             counter_str_opt.expect("No input value. Did you call fetch()?")
                            .parse::<u64>()
-                           .expect("Failed to parse the counter's value");
-
-        // Make sure that this truly was a raw counter, with no suffix
-        assert_eq!(should_be_none, None);
+                           .expect("Could not parse the raw counter");
 
         // Return the parsed counter value to our client
         counter
@@ -207,7 +233,7 @@ pub enum MemInfoFieldKind {
 }
 ///
 /// State of a meminfo record streamer
-enum MemInfoRecordState { AtStart, AfterLabel, AfterPayload }
+enum MemInfoRecordState { AtStart, AtLabel, AtPayload }
 
 
 /// Data samples from /proc/meminfo, in structure-of-array layout
