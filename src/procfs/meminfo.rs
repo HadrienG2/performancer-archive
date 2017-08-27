@@ -1,12 +1,12 @@
 //! This module contains a sampling parser for /proc/meminfo
 
-use ::sampler::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use bytesize::ByteSize;
 use std::iter::Fuse;
 
 // Implement a sampler for /proc/meminfo using MemInfoData for parsing & storage
-define_sampler!{ MemInfoSampler : "/proc/meminfo" => MemInfoData }
+define_sampler!{ MemInfoSampler : "/proc/meminfo" => MemInfoParser
+                                                  => MemInfoData }
 
 
 /// Streaming parser for /proc/meminfo
@@ -254,25 +254,19 @@ struct MemInfoData {
 
     /// Keys associated with each record, again in file order
     keys: Vec<String>,
-
-    /// New-style meminfo parser
-    /// TODO: Just a check that it works, move to new-style sampler after that
-    parser: MemInfoParser,
 }
 //
-impl PseudoFileParser for MemInfoData {
+impl MemInfoData {
     /// Create a new memory info data store, using a first sample to know the
     /// structure of /proc/meminfo on this system
-    fn new(initial_contents: &str) -> Self {
+    fn new(mut stream: MemInfoStream) -> Self {
         // Our data store will eventually go there
         let mut store = Self {
             data: Vec::new(),
             keys: Vec::new(),
-            parser: MemInfoParser::new(initial_contents),
         };
 
         // For initial record of /proc/meminfo...
-        let mut stream = store.parser.parse(initial_contents);
         while let Some(mut record) = stream.next() {
             // Fetch the record's label
             record.fetch();
@@ -299,9 +293,8 @@ impl PseudoFileParser for MemInfoData {
 
     /// Parse the contents of /proc/meminfo and add a data sample to all
     /// corresponding entries in the internal data store
-    fn push(&mut self, file_contents: &str) {
+    fn push(&mut self, mut stream: MemInfoStream) {
         // This time, we know how lines of /proc/meminfo map to our members
-        let mut stream = self.parser.parse(file_contents);
         for (data, key) in self.data.iter_mut().zip(self.keys.iter()) {
             // We start by iterating over records and checking that each record
             // that we observed during initialization is still around
@@ -431,7 +424,7 @@ impl MemInfoPayloads {
 mod tests {
     use ::splitter::split_line_and_run;
     use super::{ByteSize, MemInfoData, MemInfoPayloads, MemInfoRecordStream,
-                MemInfoRecordState, PseudoFileParser};
+                MemInfoRecordState};
 
     // TODO: Tests need to be completely reviewed :(
 
