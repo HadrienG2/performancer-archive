@@ -66,7 +66,7 @@ pub struct MemInfoFieldStream<'a, 'b> where 'a: 'b {
     /// Fused iterator into the columns of the active record
     fused_columns: Fuse<SplitColumns<'a, 'b>>,
 
-    /// State of the meminfo record iterator
+    /// Supplementary state indicating on which field we should be
     state: MemInfoFieldStreamState,
 }
 //
@@ -107,7 +107,7 @@ impl<'a, 'b> MemInfoFieldStream<'a, 'b> {
         }
     }
 
-    /// Constructor a new record stream from associated file columns
+    /// Construct a new record stream from associated file columns
     fn new(file_columns: SplitColumns<'a, 'b>) -> Self {
         Self {
             fused_columns: file_columns.fuse(),
@@ -121,7 +121,7 @@ impl<'a, 'b> MemInfoFieldStream<'a, 'b> {
 enum MemInfoFieldStreamState { OnLabel, OnPayload, AtEnd }
 ///
 ///
-/// Raw field from a /proc/meminfo record
+/// Raw, unparsed field from a /proc/meminfo record
 ///
 /// Use the kind() method in order to analyze the /proc/meminfo schema, check
 /// the parser's assumptions, and eliminate the data volume / counter parsing
@@ -137,16 +137,10 @@ pub struct MemInfoField<'a> {
 }
 ///
 impl<'a> MemInfoField<'a> {
-    /// Analyze the active meminfo record field
-    ///
-    /// Run this method after fetching data in order to validate the input and
-    /// eliminate schema ambiguities. Once you know about the contents of a
-    /// certain meminfo record, you can skip this step and go for the
-    /// appropriate parse_xyz method directly for better performance.
-    ///
+    /// Tell how the active meminfo record field should be parsed (if at all)
     fn kind(&self) -> MemInfoFieldKind {
         match self.stream_state {
-            // A meminfo record label was just loaded, validate it
+            // This field should be a meminfo record label, validate it
             MemInfoFieldStreamState::OnLabel => {
                 // A valid label (with a trailing colon) should be present
                 let has_valid_label =
@@ -163,8 +157,8 @@ impl<'a> MemInfoField<'a> {
                 }
             },
 
-            // A payload was just loaded, validate it and disambiguate what kind
-            // of payload we're dealing with (data volume or raw counter?)
+            // This field should be a meminfo record payload, validate it and
+            // disambiguate between data volumes and raw counter payloads.
             MemInfoFieldStreamState::OnPayload => {
                 // A valid payload should start with a positive integer
                 let has_valid_ctr = self.file_columns[0]
@@ -181,10 +175,10 @@ impl<'a> MemInfoField<'a> {
                 }
             },
 
-            // We were at the end of the stream. This should not happen, as the
-            // parent stream should panic on past-the-end iteration
+            // This field should not exist. The parent stream has failed at its
+            // task of panicking in case past-the-end iteration is attempted.
             MemInfoFieldStreamState::AtEnd => {
-                panic!("Parent iterator should have panicked")
+                panic!("Parent stream should have panicked")
             }
         }
     }
@@ -210,9 +204,9 @@ impl<'a> MemInfoField<'a> {
         // Parse data volume, which is in kibibytes (no matter what Linux says)
         let data_volume = ByteSize::kib(
             self.file_columns[0]
-                .expect("Missing KiBs counter in /proc/meminfo")
+                .expect("Missing data counter in /proc/meminfo")
                 .parse::<usize>()
-                .expect("Could not parse kibibytes counter.")
+                .expect("Could not parse data counter.")
         );
 
         // Return the parsed data volume to our caller
@@ -284,7 +278,7 @@ impl MemInfoData {
 
         // For initial record of /proc/meminfo...
         while let Some(mut record) = stream.next() {
-            // Fetch and parese the record's label
+            // Fetch and parse the record's label
             let label = {
                 let label_field = record.next();
                 assert_eq!(label_field.kind(), MemInfoFieldKind::Label,
@@ -389,7 +383,7 @@ impl MemInfoPayloads {
                 MemInfoPayloads::Unsupported(0)
             },
 
-            // Parser yielded a label (=> upstream MemInfoData messed up)
+            // Parser yielded a label (i.e. upstream MemInfoData messed up)
             MemInfoFieldKind::Label => {
                 panic!("Meminfo record label should already have been fetched")
             },
