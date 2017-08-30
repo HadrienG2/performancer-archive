@@ -5,8 +5,7 @@ use bytesize::ByteSize;
 use std::iter::Fuse;
 
 // Implement a sampler for /proc/meminfo
-define_sampler!{ Sampler : "/proc/meminfo" => Parser
-                                           => SampledData }
+define_sampler!{ Sampler : "/proc/meminfo" => Parser => SampledData }
 
 
 /// Streaming parser for /proc/meminfo

@@ -6,8 +6,7 @@ use std::time::Duration;
 
 
 // Implement a sampler for /proc/uptime
-define_sampler!{ Sampler : "/proc/uptime" => Parser
-                                          => SampledData }
+define_sampler!{ Sampler : "/proc/uptime" => Parser => SampledData }
 
 
 /// Streaming parser for /proc/uptime
