@@ -4,9 +4,9 @@ use ::splitter::{SplitColumns, SplitLinesBySpace};
 use bytesize::ByteSize;
 use std::iter::Fuse;
 
-// Implement a sampler for /proc/meminfo using MemInfoData for parsing & storage
-define_sampler!{ MemInfoSampler : "/proc/meminfo" => MemInfoParser
-                                                  => MemInfoData }
+// Implement a sampler for /proc/meminfo
+define_sampler!{ Sampler : "/proc/meminfo" => Parser
+                                           => SampledData }
 
 
 /// Streaming parser for /proc/meminfo
@@ -14,18 +14,17 @@ define_sampler!{ MemInfoSampler : "/proc/meminfo" => MemInfoParser
 /// TODO: Decide whether a more extensive description is needed
 ///
 #[derive(Debug, PartialEq)]
-pub struct MemInfoParser {}
+pub struct Parser {}
 //
-impl MemInfoParser {
+impl Parser {
     /// Build a parser, using initial file contents for schema analysis
     pub fn new(_initial_contents: &str) -> Self {
         Self {}
     }
 
-    /// Begin to parse a pseudo-file sample, streaming its data out
-    pub fn parse<'a>(&mut self,
-                     file_contents: &'a str) -> MemInfoRecordStream<'a> {
-        MemInfoRecordStream {
+    /// Parse a pseudo-file sample into a stream of records
+    pub fn parse<'a>(&mut self, file_contents: &'a str) -> RecordStream<'a> {
+        RecordStream {
             file_lines: SplitLinesBySpace::new(file_contents),
         }
     }
@@ -37,17 +36,17 @@ impl MemInfoParser {
 /// This streaming iterator should yield a stream of memory info records, each
 /// representing a line of /proc/meminfo (i.e. a named counter or data volume).
 ///
-pub struct MemInfoRecordStream<'a> {
+pub struct RecordStream<'a> {
     /// Iterator into the lines and columns of /proc/meminfo
     file_lines: SplitLinesBySpace<'a>,
 }
 //
-impl<'a> MemInfoRecordStream<'a> {
-    /// Parse the next record from /proc/meminfo
-    pub fn next<'b>(&'b mut self) -> Option<MemInfoFieldStream<'a, 'b>>
+impl<'a> RecordStream<'a> {
+    /// Parse the next record from /proc/meminfo into a stream of fields
+    pub fn next<'b>(&'b mut self) -> Option<FieldStream<'a, 'b>>
         where 'a: 'b
     {
-        self.file_lines.next().map(MemInfoFieldStream::new)
+        self.file_lines.next().map(FieldStream::new)
     }
 }
 ///
@@ -62,38 +61,38 @@ impl<'a> MemInfoRecordStream<'a> {
 ///
 /// Unsupported payload formats are detected and reported appropriately
 ///
-pub struct MemInfoFieldStream<'a, 'b> where 'a: 'b {
+pub struct FieldStream<'a, 'b> where 'a: 'b {
     /// Fused iterator into the columns of the active record
     fused_columns: Fuse<SplitColumns<'a, 'b>>,
 
     /// Supplementary state indicating on which field we should be
-    state: MemInfoFieldStreamState,
+    state: FieldStreamState,
 }
 //
-impl<'a, 'b> MemInfoFieldStream<'a, 'b> {
+impl<'a, 'b> FieldStream<'a, 'b> {
     /// Read the next field of the meminfo record
     ///
     /// Since in the case of /proc/meminfo, the number of fields in a record
     /// is known at compile time, past the end iteration is considered to be
     /// a usage error and not supported in the interface.
     ///
-    pub fn next(&mut self) -> MemInfoField<'a> {
+    pub fn next(&mut self) -> Field<'a> {
         // Fetch the appropriate data from the underlying columns iterator
         let stream_state = self.state;
         match self.state {
             // Fetch the textual label of the record
-            MemInfoFieldStreamState::OnLabel => {
-                self.state = MemInfoFieldStreamState::OnPayload;
-                MemInfoField {
+            FieldStreamState::OnLabel => {
+                self.state = FieldStreamState::OnPayload;
+                Field {
                     file_columns: [self.fused_columns.next(), None],
                     stream_state,
                 }
             },
 
             // Fetch the payload of the record (quantity being measured)
-            MemInfoFieldStreamState::OnPayload => {
-                self.state = MemInfoFieldStreamState::AtEnd;
-                MemInfoField {
+            FieldStreamState::OnPayload => {
+                self.state = FieldStreamState::AtEnd;
+                Field {
                     file_columns: [self.fused_columns.next(),
                                    self.fused_columns.next()],
                     stream_state,
@@ -101,7 +100,7 @@ impl<'a, 'b> MemInfoFieldStream<'a, 'b> {
             },
 
             // There should be nothing after the record's payload
-            MemInfoFieldStreamState::AtEnd => {
+            FieldStreamState::AtEnd => {
                 panic!("No record field expected after the payload")
             },
         }
@@ -111,37 +110,37 @@ impl<'a, 'b> MemInfoFieldStream<'a, 'b> {
     fn new(file_columns: SplitColumns<'a, 'b>) -> Self {
         Self {
             fused_columns: file_columns.fuse(),
-            state: MemInfoFieldStreamState::OnLabel,
+            state: FieldStreamState::OnLabel,
         }
     }
 }
 ///
 /// State of a meminfo field stream
 #[derive(Clone, Copy)]
-enum MemInfoFieldStreamState { OnLabel, OnPayload, AtEnd }
+enum FieldStreamState { OnLabel, OnPayload, AtEnd }
 ///
 ///
-/// Raw, unparsed field from a /proc/meminfo record
+/// Parseable field from a /proc/meminfo record
 ///
 /// Use the kind() method in order to analyze the /proc/meminfo schema, check
-/// the parser's assumptions, and eliminate the data volume / counter parsing
+/// the parser's assumptions, and eliminate the data volume vs counter parsing
 /// ambiguity. After the first sample, you can safely switch to calling the
 /// appropriate parse_xyz() method directly.
 ///
-pub struct MemInfoField<'a> {
+pub struct Field<'a> {
     // Buffer for the record column(s) associated with this field
     file_columns: [Option<&'a str>; 2],
 
     // What kind of field was expected by the parent stream
-    stream_state: MemInfoFieldStreamState,
+    stream_state: FieldStreamState,
 }
 ///
-impl<'a> MemInfoField<'a> {
+impl<'a> Field<'a> {
     /// Tell how the active meminfo record field should be parsed (if at all)
-    fn kind(&self) -> MemInfoFieldKind {
+    fn kind(&self) -> FieldKind {
         match self.stream_state {
             // This field should be a meminfo record label, validate it
-            MemInfoFieldStreamState::OnLabel => {
+            FieldStreamState::OnLabel => {
                 // A valid label (with a trailing colon) should be present
                 let has_valid_label =
                     self.file_columns[0]
@@ -151,15 +150,15 @@ impl<'a> MemInfoField<'a> {
 
                 // Tell whether a valid label was present in the input
                 if has_valid_label {
-                    MemInfoFieldKind::Label
+                    FieldKind::Label
                 } else {
-                    MemInfoFieldKind::Unsupported
+                    FieldKind::Unsupported
                 }
             },
 
             // This field should be a meminfo record payload, validate it and
             // disambiguate between data volumes and raw counter payloads.
-            MemInfoFieldStreamState::OnPayload => {
+            FieldStreamState::OnPayload => {
                 // A valid payload should start with a positive integer
                 let has_valid_ctr = self.file_columns[0]
                                         .as_ref()
@@ -169,15 +168,15 @@ impl<'a> MemInfoField<'a> {
                 // Payload types are further disambiguated by the presence or
                 // absence of a supported unit suffix
                 match (has_valid_ctr, self.file_columns[1]) {
-                    (true, Some("kB")) => MemInfoFieldKind::DataVolume,
-                    (true, None)       => MemInfoFieldKind::Counter,
-                    _                  => MemInfoFieldKind::Unsupported,
+                    (true, Some("kB")) => FieldKind::DataVolume,
+                    (true, None)       => FieldKind::Counter,
+                    _                  => FieldKind::Unsupported,
                 }
             },
 
             // This field should not exist. The parent stream has failed at its
             // task of panicking in case past-the-end iteration is attempted.
-            MemInfoFieldStreamState::AtEnd => {
+            FieldStreamState::AtEnd => {
                 panic!("Parent stream should have panicked")
             }
         }
@@ -186,7 +185,7 @@ impl<'a> MemInfoField<'a> {
     /// Parse the current meminfo record field as a label
     fn parse_label(self) -> &'a str {
         // In debug mode, validate that we are indeed on a label
-        debug_assert_eq!(self.kind(), MemInfoFieldKind::Label);
+        debug_assert_eq!(self.kind(), FieldKind::Label);
 
         // Fetch the label from our column buffer (and reset the buffer)
         let label = self.file_columns[0]
@@ -199,7 +198,7 @@ impl<'a> MemInfoField<'a> {
     /// Parse the current meminfo record field as a data volume
     fn parse_data_volume(self) -> ByteSize {
         // In debug mode, validate that we are indeed on a data volume
-        debug_assert_eq!(self.kind(), MemInfoFieldKind::DataVolume);
+        debug_assert_eq!(self.kind(), FieldKind::DataVolume);
 
         // Parse data volume, which is in kibibytes (no matter what Linux says)
         let data_volume = ByteSize::kib(
@@ -216,7 +215,7 @@ impl<'a> MemInfoField<'a> {
     /// Parse the current meminfo record field as a raw counter
     fn parse_counter(self) -> u64 {
         // In debug mode, validate that we are indeed on a data volume
-        debug_assert_eq!(self.kind(), MemInfoFieldKind::Counter);
+        debug_assert_eq!(self.kind(), FieldKind::Counter);
 
         // Parse the counter's value
         let counter = self.file_columns[0]
@@ -231,7 +230,7 @@ impl<'a> MemInfoField<'a> {
 ///
 /// Fields of a meminfo record can feature different kinds of data
 #[derive(Debug, PartialEq)]
-pub enum MemInfoFieldKind {
+pub enum FieldKind {
     /// Textual identifier of the record
     Label,
 
@@ -258,18 +257,18 @@ pub enum MemInfoFieldKind {
 /// to build and use a HashMap for this purpose.
 ///
 #[derive(Debug, PartialEq)]
-struct MemInfoData {
+struct SampledData {
     /// Sampled meminfo payloads, in the order in which it appears in the file
-    data: Vec<MemInfoPayloads>,
+    data: Vec<SampledPayloads>,
 
     /// Keys associated with each record, again in file order
     keys: Vec<String>,
 }
 //
-impl MemInfoData {
+impl SampledData {
     /// Create a new memory info data store, using a first sample to know the
     /// structure of /proc/meminfo on this system
-    fn new(mut stream: MemInfoRecordStream) -> Self {
+    fn new(mut stream: RecordStream) -> Self {
         // Our data store will eventually go there
         let mut store = Self {
             data: Vec::new(),
@@ -281,16 +280,16 @@ impl MemInfoData {
             // Fetch and parse the record's label
             let label = {
                 let label_field = record.next();
-                assert_eq!(label_field.kind(), MemInfoFieldKind::Label,
+                assert_eq!(label_field.kind(), FieldKind::Label,
                            "Expected a meminfo record label");
                 label_field.parse_label()
             };
 
             // Analyze the record's data payload
-            let data = MemInfoPayloads::new(record.next());
+            let data = SampledPayloads::new(record.next());
 
             // Report unsupported payloads in debug mode
-            debug_assert!(data != MemInfoPayloads::Unsupported(0),
+            debug_assert!(data != SampledPayloads::Unsupported(0),
                           "Missing support for a meminfo record named {}",
                           label);
 
@@ -305,7 +304,7 @@ impl MemInfoData {
 
     /// Parse the contents of /proc/meminfo and add a data sample to all
     /// corresponding entries in the internal data store
-    fn push(&mut self, mut stream: MemInfoRecordStream) {
+    fn push(&mut self, mut stream: RecordStream) {
         // This time, we know how lines of /proc/meminfo map to our members
         for (data, key) in self.data.iter_mut().zip(self.keys.iter()) {
             // We start by iterating over records and checking that each record
@@ -349,7 +348,7 @@ impl MemInfoData {
 
 /// Sampled payloads from /proc/meminfo, which can measure different things:
 #[derive(Debug, PartialEq)]
-enum MemInfoPayloads {
+enum SampledPayloads {
     /// A volume of data
     DataVolume(Vec<ByteSize>),
 
@@ -364,48 +363,48 @@ enum MemInfoPayloads {
     Unsupported(usize),
 }
 //
-impl MemInfoPayloads {
+impl SampledPayloads {
     /// Create a new payload, choosing the type based on some sample record
-    fn new(field: MemInfoField) -> Self {
+    fn new(field: Field) -> Self {
         match field.kind() {
             // Parser yielded a volume of data
-            MemInfoFieldKind::DataVolume => {
-                MemInfoPayloads::DataVolume(Vec::new())
+            FieldKind::DataVolume => {
+                SampledPayloads::DataVolume(Vec::new())
             },
 
             // Parser yielded a raw counter without special semantics
-            MemInfoFieldKind::Counter => {
-                MemInfoPayloads::Counter(Vec::new())
+            FieldKind::Counter => {
+                SampledPayloads::Counter(Vec::new())
             },
 
             // Parser failed to recognize the inner data type
-            MemInfoFieldKind::Unsupported => {
-                MemInfoPayloads::Unsupported(0)
+            FieldKind::Unsupported => {
+                SampledPayloads::Unsupported(0)
             },
 
-            // Parser yielded a label (i.e. upstream MemInfoData messed up)
-            MemInfoFieldKind::Label => {
-                panic!("Meminfo record label should already have been fetched")
+            // Parser yielded a label (i.e. upstream SampledData messed up)
+            FieldKind::Label => {
+                panic!("meminfo record label should already have been fetched")
             },
         }
     }
 
     /// Push new data inside of the payload table
-    fn push(&mut self, field: MemInfoField) {
+    fn push(&mut self, field: Field) {
         // Use our knowledge from the first parse to tell what this should be
         match *self {
             // A data volume in kibibytes
-            MemInfoPayloads::DataVolume(ref mut v) => {
+            SampledPayloads::DataVolume(ref mut v) => {
                 v.push(field.parse_data_volume());
             },
 
             // A raw counter
-            MemInfoPayloads::Counter(ref mut v) => {
+            SampledPayloads::Counter(ref mut v) => {
                 v.push(field.parse_counter());
             },
 
             // Something unknown and mysterious
-            MemInfoPayloads::Unsupported(ref mut count) => {
+            SampledPayloads::Unsupported(ref mut count) => {
                 *count += 1;
             },
         }
@@ -422,9 +421,9 @@ impl MemInfoPayloads {
     #[cfg(test)]
     fn len(&self) -> usize {
         match *self {
-            MemInfoPayloads::DataVolume(ref v)  => v.len(),
-            MemInfoPayloads::Counter(ref v)     => v.len(),
-            MemInfoPayloads::Unsupported(count) => count,
+            SampledPayloads::DataVolume(ref v)  => v.len(),
+            SampledPayloads::Counter(ref v)     => v.len(),
+            SampledPayloads::Unsupported(count) => count,
         }
     }
 }
@@ -433,10 +432,6 @@ impl MemInfoPayloads {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use ::splitter::split_line_and_run;
-    use super::{ByteSize, MemInfoData, MemInfoPayloads, MemInfoRecordStream,
-                MemInfoFieldStreamState};
-
     // TODO: Tests need to be completely reviewed :(
 
     /* /// Check that meminfo record initialization works well
@@ -541,7 +536,7 @@ mod tests {
     } */
 
     /// Check that the sampler works well
-    define_sampler_tests!{ super::MemInfoSampler }
+    define_sampler_tests!{ super::Sampler }
 
     /* /// INTERNAL: Build a MemInfoPayloads using columns from a certain string
     fn build_record(input: &str) -> MemInfoPayloads {
@@ -560,7 +555,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    define_sampler_benchs!{ super::MemInfoSampler,
+    define_sampler_benchs!{ super::Sampler,
                             "/proc/meminfo",
                             500_000 }
 }
