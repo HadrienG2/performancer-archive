@@ -7,15 +7,12 @@ mod paging;
 use ::sampler::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use chrono::{DateTime, TimeZone, Utc};
-use self::cpu::CPUStatData;
-use self::interrupt::InterruptStatData;
-use self::paging::PagingStatData;
 use std::fmt::Debug;
 use std::str::FromStr;
 
 
 // Implement a sampler for /proc/stat using StatData for parsing & storage
-define_sampler!{ StatSampler : "/proc/stat" => StatData }
+define_sampler!{ Sampler : "/proc/stat" => SampledData }
 
 
 /// Data samples from /proc/stat, in structure-of-array layout
@@ -26,25 +23,25 @@ define_sampler!{ StatSampler : "/proc/stat" => StatData }
 /// considered optional at this point...
 ///
 #[derive(Debug, PartialEq)]
-struct StatData {
+struct SampledData {
     /// Total CPU usage stats, aggregated across all hardware threads
-    all_cpus: Option<CPUStatData>,
+    all_cpus: Option<cpu::SampledData>,
 
     /// Per-CPU usage statistics, featuring one entry per hardware thread
     ///
     /// An empty Vec here has the same meaning as a None in other entries: the
     /// per-thread breakdown of CPU usage was not provided by the kernel.
     ///
-    each_cpu: Vec<CPUStatData>,
+    each_cpu: Vec<cpu::SampledData>,
 
     /// Number of pages that the system paged in and out from disk, overall...
-    paging: Option<PagingStatData>,
+    paging: Option<paging::SampledData>,
 
     /// ...and narrowing it down to swapping activity in particular
-    swapping: Option<PagingStatData>,
+    swapping: Option<paging::SampledData>,
 
     /// Statistics on the number of hardware interrupts that were serviced
-    interrupts: Option<InterruptStatData>,
+    interrupts: Option<interrupt::SampledData>,
 
     // NOTE: Linux 2.4 used to have disk_io statistics in /proc/stat as well,
     //       but since that is incredibly ancient, we propose not to support it.
@@ -67,7 +64,7 @@ struct StatData {
     /// Statistics on the number of softirqs that were serviced. These use the
     /// same layout as hardware interrupt stats, where softirqs are enumerated
     /// in the same order as in /proc/softirq.
-    softirqs: Option<InterruptStatData>,
+    softirqs: Option<interrupt::SampledData>,
 
     /// INTERNAL: This vector indicates how each line of /proc/stat maps to the
     /// members of this struct. It basically is a legal and move-friendly
@@ -81,7 +78,7 @@ struct StatData {
     line_target: Vec<StatDataMember>,
 }
 //
-impl PseudoFileParser for StatData {
+impl PseudoFileParser for SampledData {
     /// Create a new statistical data store, using a first sample to know the
     /// structure of /proc/stat on this system
     fn new(initial_contents: &str) -> Self {
@@ -112,7 +109,9 @@ impl PseudoFileParser for StatData {
                 // Statistics on all CPUs (should come first)
                 "cpu" => {
                     num_cpu_timers = columns.count() as u8;
-                    data.all_cpus = Some(CPUStatData::new(num_cpu_timers));
+                    data.all_cpus = Some(
+                        cpu::SampledData::new(num_cpu_timers)
+                    );
                     data.line_target.push(StatDataMember::AllCPUs);
                 }
 
@@ -121,19 +120,21 @@ impl PseudoFileParser for StatData {
                 header if &header[0..3] == "cpu" => {
                     assert_eq!(columns.count() as u8, num_cpu_timers,
                                "Inconsistent amount of CPU timers");
-                    data.each_cpu.push(CPUStatData::new(num_cpu_timers));
+                    data.each_cpu.push(
+                        cpu::SampledData::new(num_cpu_timers)
+                    );
                     data.line_target.push(StatDataMember::EachCPU);
                 },
 
                 // Paging statistics
                 "page" => {
-                    data.paging = Some(PagingStatData::new());
+                    data.paging = Some(paging::SampledData::new());
                     data.line_target.push(StatDataMember::Paging);
                 },
 
                 // Swapping statistics
                 "swap" => {
-                    data.swapping = Some(PagingStatData::new());
+                    data.swapping = Some(paging::SampledData::new());
                     data.line_target.push(StatDataMember::Swapping);
                 },
 
@@ -141,7 +142,7 @@ impl PseudoFileParser for StatData {
                 "intr" => {
                     let num_interrupts = (columns.count() - 1) as u16;
                     data.interrupts = Some(
-                        InterruptStatData::new(num_interrupts)
+                        interrupt::SampledData::new(num_interrupts)
                     );
                     data.line_target.push(StatDataMember::Interrupts);
                 },
@@ -190,7 +191,7 @@ impl PseudoFileParser for StatData {
                 "softirq" => {
                     let num_interrupts = (columns.count() - 1) as u16;
                     data.softirqs = Some(
-                        InterruptStatData::new(num_interrupts)
+                        interrupt::SampledData::new(num_interrupts)
                     );
                     data.line_target.push(StatDataMember::SoftIRQs);
                 },
@@ -315,7 +316,7 @@ impl PseudoFileParser for StatData {
     }
 }
 //
-impl StatData {
+impl SampledData {
     /// INTERNAL: Helpful wrapper for pushing into optional containers that we
     ///           actually know from additional metadata to be around
     fn force_push<T>(store: &mut Option<T>, columns: SplitColumns)
@@ -417,8 +418,8 @@ impl<T, U> StatDataStore for Vec<T>
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
-    use super::{CPUStatData, InterruptStatData, PagingStatData,
-                PseudoFileParser, StatData, StatDataMember, StatDataStore};
+    use super::{PseudoFileParser, SampledData, StatDataMember, StatDataStore};
+    use super::{cpu, interrupt, paging};
 
     /// Check that scalar statistics parsing works as expected
     #[test]
@@ -435,7 +436,7 @@ mod tests {
     fn init_stat_data() {
         // Starting with an empty file (should never happen, but good base case)
         let mut stats = String::new();
-        let empty_stats = StatData::new(&stats);
+        let empty_stats = SampledData::new(&stats);
         assert!(empty_stats.all_cpus.is_none());
         assert_eq!(empty_stats.each_cpu.len(), 0);
         assert!(empty_stats.paging.is_none());
@@ -451,8 +452,8 @@ mod tests {
 
         // ...adding global CPU stats
         stats.push_str("cpu 1 2 3 4");
-        let global_cpu_stats = StatData::new(&stats);
-        expected.all_cpus = Some(CPUStatData::new(4));
+        let global_cpu_stats = SampledData::new(&stats);
+        expected.all_cpus = Some(cpu::SampledData::new(4));
         expected.line_target.push(StatDataMember::AllCPUs);
         assert_eq!(global_cpu_stats, expected);
         assert_eq!(expected.len(), 0);
@@ -460,8 +461,8 @@ mod tests {
         // ...adding dual-core CPU stats
         stats.push_str("\ncpu0 0 1 1 3
                           cpu1 1 1 2 1");
-        let local_cpu_stats = StatData::new(&stats);
-        expected.each_cpu = vec![CPUStatData::new(4); 2];
+        let local_cpu_stats = SampledData::new(&stats);
+        expected.each_cpu = vec![cpu::SampledData::new(4); 2];
         expected.line_target.push(StatDataMember::EachCPU);
         expected.line_target.push(StatDataMember::EachCPU);
         assert_eq!(local_cpu_stats, expected);
@@ -469,31 +470,31 @@ mod tests {
 
         // ...adding paging stats
         stats.push_str("\npage 42 43");
-        let paging_stats = StatData::new(&stats);
-        expected.paging = Some(PagingStatData::new());
+        let paging_stats = SampledData::new(&stats);
+        expected.paging = Some(paging::SampledData::new());
         expected.line_target.push(StatDataMember::Paging);
         assert_eq!(paging_stats, expected);
         assert_eq!(expected.len(), 0);
 
         // ...adding swapping stats
         stats.push_str("\nswap 24 34");
-        let swapping_stats = StatData::new(&stats);
-        expected.swapping = Some(PagingStatData::new());
+        let swapping_stats = SampledData::new(&stats);
+        expected.swapping = Some(paging::SampledData::new());
         expected.line_target.push(StatDataMember::Swapping);
         assert_eq!(swapping_stats, expected);
         assert_eq!(expected.len(), 0);
 
         // ...adding interrupt stats
         stats.push_str("\nintr 12345 678 910");
-        let interrupt_stats = StatData::new(&stats);
-        expected.interrupts = Some(InterruptStatData::new(2));
+        let interrupt_stats = SampledData::new(&stats);
+        expected.interrupts = Some(interrupt::SampledData::new(2));
         expected.line_target.push(StatDataMember::Interrupts);
         assert_eq!(interrupt_stats, expected);
         assert_eq!(expected.len(), 0);
 
         // ...adding context switches
         stats.push_str("\nctxt 654321");
-        let context_stats = StatData::new(&stats);
+        let context_stats = SampledData::new(&stats);
         expected.context_switches = Some(Vec::new());
         expected.line_target.push(StatDataMember::ContextSwitches);
         assert_eq!(context_stats, expected);
@@ -501,7 +502,7 @@ mod tests {
 
         // ...adding boot time
         stats.push_str("\nbtime 5738295");
-        let boot_time_stats = StatData::new(&stats);
+        let boot_time_stats = SampledData::new(&stats);
         expected.boot_time = Some(Utc.timestamp(5738295, 0));
         expected.line_target.push(StatDataMember::BootTime);
         assert_eq!(boot_time_stats, expected);
@@ -509,7 +510,7 @@ mod tests {
 
         // ...adding process fork counter
         stats.push_str("\nprocesses 94536551");
-        let process_fork_stats = StatData::new(&stats);
+        let process_fork_stats = SampledData::new(&stats);
         expected.process_forks = Some(Vec::new());
         expected.line_target.push(StatDataMember::ProcessForks);
         assert_eq!(process_fork_stats, expected);
@@ -517,7 +518,7 @@ mod tests {
 
         // ...adding runnable process counter
         stats.push_str("\nprocs_running 1624");
-        let runnable_process_stats = StatData::new(&stats);
+        let runnable_process_stats = SampledData::new(&stats);
         expected.runnable_processes = Some(Vec::new());
         expected.line_target.push(StatDataMember::RunnableProcesses);
         assert_eq!(runnable_process_stats, expected);
@@ -525,7 +526,7 @@ mod tests {
 
         // ...adding blocked process counter
         stats.push_str("\nprocs_blocked 8948");
-        let blocked_process_stats = StatData::new(&stats);
+        let blocked_process_stats = SampledData::new(&stats);
         expected.blocked_processes = Some(Vec::new());
         expected.line_target.push(StatDataMember::BlockedProcesses);
         assert_eq!(blocked_process_stats, expected);
@@ -533,8 +534,8 @@ mod tests {
 
         // ...adding softirq stats
         stats.push_str("\nsoftirq 94651 1561 21211 12 71867");
-        let softirq_stats = StatData::new(&stats);
-        expected.softirqs = Some(InterruptStatData::new(4));
+        let softirq_stats = SampledData::new(&stats);
+        expected.softirqs = Some(interrupt::SampledData::new(4));
         expected.line_target.push(StatDataMember::SoftIRQs);
         assert_eq!(softirq_stats, expected);
         assert_eq!(expected.len(), 0);
@@ -545,16 +546,16 @@ mod tests {
     fn parse_stat_data() {
         // Starting with an empty file (should never happen, but good base case)
         let mut stats = String::new();
-        let mut empty_stats = StatData::new(&stats);
+        let mut empty_stats = SampledData::new(&stats);
         empty_stats.push(&stats);
-        let mut expected = StatData::new(&stats);
+        let mut expected = SampledData::new(&stats);
         assert_eq!(empty_stats, expected);
 
         // Adding global CPU stats
         stats.push_str("cpu 1 2 3 4");
-        let mut global_cpu_stats = StatData::new(&stats);
+        let mut global_cpu_stats = SampledData::new(&stats);
         global_cpu_stats.push(&stats);
-        expected = StatData::new(&stats);
+        expected = SampledData::new(&stats);
         expected.all_cpus.as_mut()
                          .expect("CPU stats incorrectly marked as missing")
                          .push_str("1 2 3 4");
@@ -564,9 +565,9 @@ mod tests {
         // Adding dual-core CPU stats
         stats.push_str("\ncpu0 0 1 1 3
                           cpu1 1 1 2 1");
-        let mut local_cpu_stats = StatData::new(&stats);
+        let mut local_cpu_stats = SampledData::new(&stats);
         local_cpu_stats.push(&stats);
-        expected = StatData::new(&stats);
+        expected = SampledData::new(&stats);
         expected.all_cpus.as_mut()
                          .expect("CPU stats incorrectly marked as missing")
                          .push_str("1 2 3 4");
@@ -577,9 +578,9 @@ mod tests {
 
         // Starting over from paging stats
         stats = String::from("page 42 43");
-        let mut paging_stats = StatData::new(&stats);
+        let mut paging_stats = SampledData::new(&stats);
         paging_stats.push(&stats);
-        expected = StatData::new(&stats);
+        expected = SampledData::new(&stats);
         expected.paging.as_mut()
                        .expect("Paging stats incorrectly marked as missing")
                        .push_str("42 43");
@@ -588,9 +589,9 @@ mod tests {
 
         // Starting over from softirq stats
         stats = String::from("softirq 94651 1561 21211 12 71867");
-        let mut softirq_stats = StatData::new(&stats);
+        let mut softirq_stats = SampledData::new(&stats);
         softirq_stats.push(&stats);
-        expected = StatData::new(&stats);
+        expected = SampledData::new(&stats);
         expected.softirqs.as_mut()
                          .expect("Softirq stats incorrectly marked as missing")
                          .push_str("94651 1561 21211 12 71867");
@@ -599,7 +600,7 @@ mod tests {
     }
 
     /// Check that the sampler works well
-    define_sampler_tests!{ super::StatSampler }
+    define_sampler_tests!{ super::Sampler }
 }
 
 
@@ -609,7 +610,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    define_sampler_benchs!{ super::StatSampler,
+    define_sampler_benchs!{ super::Sampler,
                             "/proc/stat",
                             100_000 }
 }

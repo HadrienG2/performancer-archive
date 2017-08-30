@@ -7,7 +7,7 @@ use super::StatDataStore;
 
 /// Storage paging ativity statistics
 #[derive(Debug, PartialEq)]
-pub(super) struct PagingStatData {
+pub(super) struct SampledData {
     /// Number of RAM pages that were paged in from disk
     incoming: Vec<u64>,
 
@@ -15,7 +15,7 @@ pub(super) struct PagingStatData {
     outgoing: Vec<u64>,
 }
 //
-impl PagingStatData {
+impl SampledData {
     /// Create new paging statistics
     pub fn new() -> Self {
         Self {
@@ -25,7 +25,7 @@ impl PagingStatData {
     }
 }
 //
-impl StatDataStore for PagingStatData {
+impl StatDataStore for SampledData {
     /// Parse paging statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitColumns) {
         // Load the incoming and outgoing page count
@@ -52,12 +52,12 @@ impl StatDataStore for PagingStatData {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::{PagingStatData, StatDataStore};
+    use super::{SampledData, StatDataStore};
 
     /// Check that paging statistics initialization works as expected
     #[test]
     fn init_paging_stat() {
-        let stats = PagingStatData::new();
+        let stats = SampledData::new();
         assert_eq!(stats.incoming.len(), 0);
         assert_eq!(stats.outgoing.len(), 0);
         assert_eq!(stats.len(), 0);
@@ -66,7 +66,7 @@ mod tests {
     /// Check that parsing paging statistics works as expected
     #[test]
     fn parse_paging_stat() {
-        let mut stats = PagingStatData::new();
+        let mut stats = SampledData::new();
         stats.push_str("123 456");
         assert_eq!(stats.incoming, vec![123]);
         assert_eq!(stats.outgoing, vec![456]);

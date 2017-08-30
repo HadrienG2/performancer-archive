@@ -9,7 +9,7 @@ use super::StatDataStore;
 
 /// The amount of CPU time that the system spent in various states
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct CPUStatData {
+pub(super) struct SampledData {
     /// Time spent in user mode
     user_time: Vec<Duration>,
 
@@ -42,7 +42,7 @@ pub(super) struct CPUStatData {
     guest_nice_time: Option<Vec<Duration>>,
 }
 //
-impl CPUStatData {
+impl SampledData {
     /// Create new CPU statistics
     pub fn new(num_timers: u8) -> Self {
         // Check if we know about all CPU timers
@@ -79,7 +79,7 @@ impl CPUStatData {
     }
 }
 //
-impl StatDataStore for CPUStatData {
+impl StatDataStore for SampledData {
     /// Parse CPU statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitColumns) {
         // This scope is needed to please rustc's current borrow checker
@@ -163,13 +163,13 @@ lazy_static! {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
-    use super::{CPUStatData, StatDataStore, TICKS_PER_SEC};
+    use super::{SampledData, StatDataStore, TICKS_PER_SEC};
 
     /// Check that CPU statistics initialization works as expected
     #[test]
     fn init_cpu_stat() {
         // Oldest known CPU stats format from Linux 4.11's man proc
-        let oldest_stats = CPUStatData::new(4);
+        let oldest_stats = SampledData::new(4);
         assert_eq!(oldest_stats.user_time.len(), 0);
         assert_eq!(oldest_stats.nice_time.len(), 0);
         assert_eq!(oldest_stats.system_time.len(), 0);
@@ -179,14 +179,14 @@ mod tests {
         assert_eq!(oldest_stats.len(), 0);
 
         // First known CPU stats extension from Linux 4.11's man proc
-        let first_ext_stats = CPUStatData::new(5);
+        let first_ext_stats = SampledData::new(5);
         assert_eq!(first_ext_stats.io_wait_time, Some(Vec::new()));
         assert!(first_ext_stats.irq_time.is_none());
         assert!(first_ext_stats.guest_nice_time.is_none());
         assert_eq!(first_ext_stats.len(), 0);
 
         // Newest known CPU stats format from Linux 4.11's man proc
-        let latest_stats = CPUStatData::new(10);
+        let latest_stats = SampledData::new(10);
         assert_eq!(latest_stats.io_wait_time, Some(Vec::new()));
         assert_eq!(latest_stats.guest_nice_time, Some(Vec::new()));
         assert_eq!(latest_stats.len(), 0);
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn parse_cpu_stat() {
         // Oldest known CPU stats format from Linux 4.11's man proc
-        let mut oldest_stats = CPUStatData::new(4);
+        let mut oldest_stats = SampledData::new(4);
 
         // Figure out the duration of a kernel tick
         let tick_duration = Duration::new(
@@ -214,14 +214,14 @@ mod tests {
         assert_eq!(oldest_stats.len(), 1);
 
         // Check that "extended" stats are parsed as well
-        let mut first_ext_stats = CPUStatData::new(5);
+        let mut first_ext_stats = SampledData::new(5);
         first_ext_stats.push_str("9 698 6521 151 56");
         assert_eq!(first_ext_stats.io_wait_time, Some(vec![tick_duration*56]));
         assert!(first_ext_stats.irq_time.is_none());
         assert_eq!(first_ext_stats.len(), 1);
 
         // Check that "complete" stats are parsed as well
-        let mut latest_stats = CPUStatData::new(10);
+        let mut latest_stats = SampledData::new(10);
         latest_stats.push_str("18 9616 11 941 5 51 9 615 62 14");
         assert_eq!(latest_stats.io_wait_time,    Some(vec![tick_duration*5]));
         assert_eq!(latest_stats.guest_nice_time, Some(vec![tick_duration*14]));

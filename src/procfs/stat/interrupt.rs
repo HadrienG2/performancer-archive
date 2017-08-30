@@ -7,26 +7,26 @@ use super::StatDataStore;
 
 /// Interrupt statistics from /proc/stat, in structure-of-array layout
 #[derive(Debug, PartialEq)]
-pub(super) struct InterruptStatData {
+pub(super) struct SampledData {
     /// Total number of interrupts that were serviced. May be higher than the
     /// sum of the breakdown below if there are unnumbered interrupt sources.
     total: Vec<u64>,
 
     /// For each numbered source, details on the amount of serviced interrupt.
-    details: Vec<InterruptCounts>
+    details: Vec<SampledCounter>
 }
 //
-impl InterruptStatData {
+impl SampledData {
     /// Create new interrupt statistics, given the amount of interrupt sources
     pub fn new(num_irqs: u16) -> Self {
         Self {
             total: Vec::new(),
-            details: vec![InterruptCounts::new(); num_irqs as usize],
+            details: vec![SampledCounter::new(); num_irqs as usize],
         }
     }
 }
 //
-impl StatDataStore for InterruptStatData {
+impl StatDataStore for SampledData {
     /// Parse interrupt statistics and add them to the internal data store
     fn push(&mut self, mut stats: SplitColumns) {
         // Load the total interrupt count
@@ -59,7 +59,7 @@ impl StatDataStore for InterruptStatData {
 /// RAM, so we take a shortcut for this common use case.
 ///
 #[derive(Clone, Debug, PartialEq)]
-enum InterruptCounts {
+enum SampledCounter {
     /// If we've only ever seen zeroes, we only count the number of zeroes
     Zeroes(usize),
 
@@ -67,33 +67,33 @@ enum InterruptCounts {
     Samples(Vec<u64>),
 }
 //
-impl InterruptCounts {
+impl SampledCounter {
     /// Initialize the interrupt count sampler
     fn new() -> Self {
-        InterruptCounts::Zeroes(0)
+        SampledCounter::Zeroes(0)
     }
 
     /// Insert a new interrupt count from /proc/stat
     fn push(&mut self, intr_count: &str) {
         match *self {
             // Have we only seen zeroes so far?
-            InterruptCounts::Zeroes(zero_count) => {
+            SampledCounter::Zeroes(zero_count) => {
                 // Are we seeing a zero again?
                 if intr_count == "0" {
                     // If yes, just increment the zero counter
-                    *self = InterruptCounts::Zeroes(zero_count+1);
+                    *self = SampledCounter::Zeroes(zero_count+1);
                 } else {
                     // If not, move to regular interrupt count sampling
                     let mut samples = vec![0; zero_count];
                     samples.push(
                         intr_count.parse().expect("Failed to parse IRQ count")
                     );
-                    *self = InterruptCounts::Samples(samples);
+                    *self = SampledCounter::Samples(samples);
                 }
             },
 
             // If the interrupt counter is nonzero, sample it normally
-            InterruptCounts::Samples(ref mut vec) => {
+            SampledCounter::Samples(ref mut vec) => {
                 vec.push(intr_count.parse()
                                    .expect("Failed to parse IRQ count"));
             }
@@ -104,8 +104,8 @@ impl InterruptCounts {
     #[cfg(test)]
     fn len(&self) -> usize {
         match *self {
-            InterruptCounts::Zeroes(zero_count) => zero_count,
-            InterruptCounts::Samples(ref vec) => vec.len(),
+            SampledCounter::Zeroes(zero_count) => zero_count,
+            SampledCounter::Samples(ref vec) => vec.len(),
         }
     }
 }
@@ -114,13 +114,13 @@ impl InterruptCounts {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::{InterruptCounts, InterruptStatData, StatDataStore};
+    use super::{SampledCounter, SampledData, StatDataStore};
 
     /// Check that initializing an interrupt count sampler works as expected
     #[test]
     fn init_interrupt_counts() {
-        let counts = InterruptCounts::new();
-        assert_eq!(counts, InterruptCounts::Zeroes(0));
+        let counts = SampledCounter::new();
+        assert_eq!(counts, SampledCounter::Zeroes(0));
         assert_eq!(counts.len(), 0);
     }
 
@@ -128,25 +128,25 @@ mod tests {
     #[test]
     fn parse_interrupt_counts() {
         // Adding one zero should keep us in the base "zeroes" state
-        let mut counts = InterruptCounts::new();
+        let mut counts = SampledCounter::new();
         counts.push("0");
-        assert_eq!(counts, InterruptCounts::Zeroes(1));
+        assert_eq!(counts, SampledCounter::Zeroes(1));
         assert_eq!(counts.len(), 1);
 
         // Adding a nonzero value should get us out of this state
         counts.push("123");
-        assert_eq!(counts, InterruptCounts::Samples(vec![0, 123]));
+        assert_eq!(counts, SampledCounter::Samples(vec![0, 123]));
         assert_eq!(counts.len(), 2);
 
         // After that, sampling should work normally
         counts.push("456");
-        assert_eq!(counts, InterruptCounts::Samples(vec![0, 123, 456]));
+        assert_eq!(counts, SampledCounter::Samples(vec![0, 123, 456]));
         assert_eq!(counts.len(), 3);
 
         // Sampling right from the start should work as well
-        let mut counts2 = InterruptCounts::new();
+        let mut counts2 = SampledCounter::new();
         counts2.push("789");
-        assert_eq!(counts2, InterruptCounts::Samples(vec![789]));
+        assert_eq!(counts2, SampledCounter::Samples(vec![789]));
         assert_eq!(counts2.len(), 1);
     }
 
@@ -154,20 +154,20 @@ mod tests {
     #[test]
     fn init_interrupt_stat() {
         // Check that interrupt statistics without any details work
-        let no_details_stats = InterruptStatData::new(0);
+        let no_details_stats = SampledData::new(0);
         assert_eq!(no_details_stats.total.len(), 0);
         assert_eq!(no_details_stats.details.len(), 0);
         assert_eq!(no_details_stats.len(), 0);
 
         // Check that interrupt statistics with two detailed counters work
-        let two_stats = InterruptStatData::new(2);
+        let two_stats = SampledData::new(2);
         assert_eq!(two_stats.details.len(), 2);
         assert_eq!(two_stats.details[0].len(), 0);
         assert_eq!(two_stats.details[1].len(), 0);
         assert_eq!(two_stats.len(), 0);
 
         // Check that interrupt statistics with lots of detailed counters work
-        let many_stats = InterruptStatData::new(256);
+        let many_stats = SampledData::new(256);
         assert_eq!(many_stats.details.len(), 256);
         assert_eq!(many_stats.details[0].len(), 0);
         assert_eq!(many_stats.details[255].len(), 0);
@@ -178,19 +178,19 @@ mod tests {
     #[test]
     fn parse_interrupt_stat() {
         // Interrupt statistics without any detail
-        let mut no_details_stats = InterruptStatData::new(0);
+        let mut no_details_stats = SampledData::new(0);
         no_details_stats.push_str("12345");
         assert_eq!(no_details_stats.total, vec![12345]);
         assert_eq!(no_details_stats.details.len(), 0);
         assert_eq!(no_details_stats.len(), 1);
 
         // Interrupt statistics with two detailed counters
-        let mut two_stats = InterruptStatData::new(2);
+        let mut two_stats = SampledData::new(2);
         two_stats.push_str("12345 678 910");
         assert_eq!(two_stats.total, vec![12345]);
         assert_eq!(two_stats.details, 
-                   vec![InterruptCounts::Samples(vec![678]),
-                        InterruptCounts::Samples(vec![910])]);
+                   vec![SampledCounter::Samples(vec![678]),
+                        SampledCounter::Samples(vec![910])]);
         assert_eq!(two_stats.len(), 1);
     }
 }
