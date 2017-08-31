@@ -116,7 +116,7 @@ impl<'a, 'b> FieldStream<'a, 'b> {
 }
 ///
 /// State of a meminfo field stream
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum FieldStreamState { OnLabel, OnPayload, AtEnd }
 ///
 ///
@@ -127,6 +127,7 @@ enum FieldStreamState { OnLabel, OnPayload, AtEnd }
 /// ambiguity. After the first sample, you can safely switch to calling the
 /// appropriate parse_xyz() method directly.
 ///
+#[derive(Debug, PartialEq)]
 pub struct Field<'a> {
     // Buffer for the record column(s) associated with this field
     file_columns: [Option<&'a str>; 2],
@@ -432,7 +433,8 @@ impl SampledPayloads {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::{ByteSize, Field, FieldKind, FieldStreamState};
+    use splitter::split_line_and_run;
+    use super::{ByteSize, Field, FieldStream, FieldKind, FieldStreamState};
 
     /// Check that label field parsing works as expected
     #[test]
@@ -500,6 +502,57 @@ mod tests {
             stream_state: FieldStreamState::OnPayload,
         };
         assert_eq!(invalid_counter.kind(), FieldKind::Unsupported);
+    }
+
+    /// Check that field streams work as expected...
+    #[test]
+    fn field_stream() {
+        // ...on streamed data volumes...
+        split_line_and_run("Test: 42 kB", |columns| {
+            let mut field_stream = FieldStream::new(columns);
+            assert_eq!(field_stream.next(),
+                       Field {
+                           file_columns: [Some("Test:"), None],
+                           stream_state: FieldStreamState::OnLabel,
+                       });
+            assert_eq!(field_stream.next(),
+                       Field {
+                           file_columns: [Some("42"), Some("kB")],
+                           stream_state: FieldStreamState::OnPayload,
+                       });
+        });
+
+        // ...on streamed raw counters...
+        split_line_and_run("OtherTest: 1984", |columns| {
+            let mut field_stream = FieldStream::new(columns);
+            assert_eq!(field_stream.next(),
+                       Field {
+                           file_columns: [Some("OtherTest:"), None],
+                           stream_state: FieldStreamState::OnLabel,
+                       });
+            assert_eq!(field_stream.next(),
+                       Field {
+                           file_columns: [Some("1984"), None],
+                           stream_state: FieldStreamState::OnPayload,
+                       });
+        });
+
+        // ...and even on blank lines, because who knows what's going to happen
+        // to meminfo's format in the future? I sure don't. That's one of the
+        // problems with human-readable text files as an OS kernel API.
+        split_line_and_run(" ", |columns| {
+            let mut field_stream = FieldStream::new(columns);
+            assert_eq!(field_stream.next(),
+                       Field {
+                           file_columns: [None, None],
+                           stream_state: FieldStreamState::OnLabel,
+                       });
+            assert_eq!(field_stream.next(),
+                       Field {
+                           file_columns: [None, None],
+                           stream_state: FieldStreamState::OnPayload,
+                       });
+        });
     }
 
     // TODO: Tests need to be completely reviewed :(
