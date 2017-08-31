@@ -432,6 +432,34 @@ impl SampledPayloads {
 /// Unit tests
 #[cfg(test)]
 mod tests {
+    use super::{Field, FieldKind, FieldStreamState};
+
+    /// Check that label field parsing works as expected
+    #[test]
+    fn label_field_parsing() {
+        // Supported label field
+        let supported_field = Field {
+            file_columns: [Some("MyLabel:"), None],
+            stream_state: FieldStreamState::OnLabel,
+        };
+        assert_eq!(supported_field.kind(), FieldKind::Label);
+        assert_eq!(supported_field.parse_label(), "MyLabel");
+
+        // Missing colon
+        let missing_colon = Field {
+            file_columns: [Some("MyOtherLabel"), None],
+            stream_state: FieldStreamState::OnLabel,
+        };
+        assert_eq!(missing_colon.kind(), FieldKind::Unsupported);
+
+        // Missing data
+        let missing_data = Field {
+            file_columns: [None, None],
+            stream_state: FieldStreamState::OnLabel,
+        };
+        assert_eq!(missing_data.kind(), FieldKind::Unsupported);
+    }
+
     // TODO: Tests need to be completely reviewed :(
 
     /* /// Check that meminfo record initialization works well
