@@ -432,18 +432,18 @@ impl SampledPayloads {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use super::{Field, FieldKind, FieldStreamState};
+    use super::{ByteSize, Field, FieldKind, FieldStreamState};
 
     /// Check that label field parsing works as expected
     #[test]
     fn label_field_parsing() {
         // Supported label field
-        let supported_field = Field {
+        let valid_label = Field {
             file_columns: [Some("MyLabel:"), None],
             stream_state: FieldStreamState::OnLabel,
         };
-        assert_eq!(supported_field.kind(), FieldKind::Label);
-        assert_eq!(supported_field.parse_label(), "MyLabel");
+        assert_eq!(valid_label.kind(), FieldKind::Label);
+        assert_eq!(valid_label.parse_label(), "MyLabel");
 
         // Missing colon
         let missing_colon = Field {
@@ -458,6 +458,48 @@ mod tests {
             stream_state: FieldStreamState::OnLabel,
         };
         assert_eq!(missing_data.kind(), FieldKind::Unsupported);
+    }
+
+    /// Check that payload field parsing works as expected
+    #[test]
+    fn payload_field_parsing() {
+        // Valid data volume payload
+        let valid_data_volume = Field {
+            file_columns: [Some("713705"), Some("kB")],
+            stream_state: FieldStreamState::OnPayload,
+        };
+        assert_eq!(valid_data_volume.kind(), FieldKind::DataVolume);
+        assert_eq!(valid_data_volume.parse_data_volume(),
+                   ByteSize::kib(713705));
+
+        // Invalid data volume unit
+        let invalid_unit = Field {
+            file_columns: [Some("1337"), Some("zorglub")],
+            stream_state: FieldStreamState::OnPayload,
+        };
+        assert_eq!(invalid_unit.kind(), FieldKind::Unsupported);
+
+        // Invalid data volume counter
+        let invalid_data_count = Field {
+            file_columns: [Some("quarante-deux"), Some("kB")],
+            stream_state: FieldStreamState::OnPayload,
+        };
+        assert_eq!(invalid_data_count.kind(), FieldKind::Unsupported);
+
+        // Valid raw counter
+        let valid_counter = Field {
+            file_columns: [Some("911"), None],
+            stream_state: FieldStreamState::OnPayload,
+        };
+        assert_eq!(valid_counter.kind(), FieldKind::Counter);
+        assert_eq!(valid_counter.parse_counter(), 911);
+
+        // Invalid raw counter
+        let invalid_counter = Field {
+            file_columns: [Some("Robespierre"), None],
+            stream_state: FieldStreamState::OnPayload,
+        };
+        assert_eq!(invalid_counter.kind(), FieldKind::Unsupported);
     }
 
     // TODO: Tests need to be completely reviewed :(
