@@ -24,9 +24,7 @@ impl Parser {
 
     /// Parse a pseudo-file sample into a stream of records
     pub fn parse<'a>(&mut self, file_contents: &'a str) -> RecordStream<'a> {
-        RecordStream {
-            file_lines: SplitLinesBySpace::new(file_contents),
-        }
+        RecordStream::new(file_contents)
     }
 }
 ///
@@ -47,6 +45,13 @@ impl<'a> RecordStream<'a> {
         where 'a: 'b
     {
         self.file_lines.next().map(FieldStream::new)
+    }
+
+    /// Create a record stream from raw contents
+    fn new(file_contents: &'a str) -> Self {
+        Self {
+            file_lines: SplitLinesBySpace::new(file_contents),
+        }
     }
 }
 ///
@@ -434,7 +439,8 @@ impl SampledPayloads {
 #[cfg(test)]
 mod tests {
     use splitter::split_line_and_run;
-    use super::{ByteSize, Field, FieldStream, FieldKind, FieldStreamState};
+    use super::{ByteSize, Field, FieldStream, FieldKind, FieldStreamState,
+                RecordStream};
 
     /// Check that label field parsing works as expected
     #[test]
@@ -508,8 +514,7 @@ mod tests {
     #[test]
     fn field_stream() {
         // ...on streamed data volumes...
-        split_line_and_run("Test: 42 kB", |columns| {
-            let mut field_stream = FieldStream::new(columns);
+        with_field_stream("Test: 42 kB", |mut field_stream| {
             assert_eq!(field_stream.next(),
                        Field {
                            file_columns: [Some("Test:"), None],
@@ -523,8 +528,7 @@ mod tests {
         });
 
         // ...on streamed raw counters...
-        split_line_and_run("OtherTest: 1984", |columns| {
-            let mut field_stream = FieldStream::new(columns);
+        with_field_stream("OtherTest: 1984", |mut field_stream| {
             assert_eq!(field_stream.next(),
                        Field {
                            file_columns: [Some("OtherTest:"), None],
@@ -540,8 +544,7 @@ mod tests {
         // ...and even on blank lines, because who knows what's going to happen
         // to meminfo's format in the future? I sure don't. That's one of the
         // problems with human-readable text files as an OS kernel API.
-        split_line_and_run(" ", |columns| {
-            let mut field_stream = FieldStream::new(columns);
+        with_field_stream(" ", |mut field_stream| {
             assert_eq!(field_stream.next(),
                        Field {
                            file_columns: [None, None],
@@ -553,6 +556,42 @@ mod tests {
                            stream_state: FieldStreamState::OnPayload,
                        });
         });
+    }
+
+    /// Check that record streams work as expected
+    #[test]
+    fn record_stream() {
+        // This is our test record stream
+        let mut record_stream = RecordStream::new("OneRecord: 321 kB\n\
+                                                   TwoRecords: 9786\n\
+                                                    \n\
+                                                   Dafuk???");
+
+        // This is how we check that one of its records is right
+        let mut check_next_record = |expected_str: &str| {
+            with_field_stream(expected_str, |mut expected_fields| {
+                let mut actual_fields = record_stream.next().unwrap();
+                assert_eq!(actual_fields.next(), expected_fields.next());
+                assert_eq!(actual_fields.next(), expected_fields.next());
+            });
+        };
+
+        // Check that our test record stream looks as expected
+        check_next_record("OneRecord: 321 kB");
+        check_next_record("TwoRecords: 9786");
+        check_next_record(" ");
+        check_next_record("Dafuk???");
+    }
+
+    /// Build the field stream associated with a certain line of text, and run
+    /// code taking it as a parameter
+    fn with_field_stream<F, R>(line_of_text: &str, functor: F) -> R
+        where F: FnOnce(FieldStream) -> R
+    {
+        split_line_and_run(line_of_text, |columns| {
+            let field_stream = FieldStream::new(columns);
+            functor(field_stream)
+        })
     }
 
     // TODO: Tests need to be completely reviewed :(
