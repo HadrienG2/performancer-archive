@@ -561,26 +561,25 @@ mod tests {
     /// Check that record streams work as expected
     #[test]
     fn record_stream() {
-        // This is our test record stream
-        let mut record_stream = RecordStream::new("OneRecord: 321 kB\n\
-                                                   TwoRecords: 9786\n\
-                                                    \n\
-                                                   Dafuk???");
+        // Build a pseudo-file from a set of records
+        let records = ["OneRecord: 321 kB", "TwoRecords: 9786", " ", "Dafuk?"];
+        let mut pseudo_file = String::new();
+        for record in records.iter() {
+            pseudo_file.push_str(record);
+            pseudo_file.push('\n');
+        }
 
-        // This is how we check that one of its records is right
-        let mut check_next_record = |expected_str: &str| {
-            with_field_stream(expected_str, |mut expected_fields| {
+        // This is the associated record stream
+        let mut record_stream = RecordStream::new(&pseudo_file);
+
+        // Check that our test record stream looks as expected
+        for record in records.iter() {
+            with_field_stream(record, |mut expected_fields| {
                 let mut actual_fields = record_stream.next().unwrap();
                 assert_eq!(actual_fields.next(), expected_fields.next());
                 assert_eq!(actual_fields.next(), expected_fields.next());
             });
-        };
-
-        // Check that our test record stream looks as expected
-        check_next_record("OneRecord: 321 kB");
-        check_next_record("TwoRecords: 9786");
-        check_next_record(" ");
-        check_next_record("Dafuk???");
+        }
     }
 
     /// Build the field stream associated with a certain line of text, and run
