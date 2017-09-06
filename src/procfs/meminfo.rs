@@ -231,6 +231,28 @@ impl<'a> Field<'a> {
         // Return the parsed counter value to our client
         counter
     }
+
+    /// Get a field that parses into a label
+    #[cfg(test)]
+    fn with_label<F, R>(label: &str, operation: F) -> R
+        where F: FnOnce(Field) -> R
+    {
+        // Build the label's tag
+        let mut label_tag = String::with_capacity(label.len()+1);
+        label_tag.push_str(label);
+        label_tag.push(':');
+
+        // Create a corresponding field struct
+        let field = Field {
+            file_columns: [Some(&label_tag), None],
+            stream_state: FieldStreamState::OnLabel,
+        };
+
+        // Run the user-provided functor on that field and return the result
+        operation(field)
+    }
+
+    // TODO: Do the same for byte counters and raw counters
 }
 ///
 /// Fields of a meminfo record can feature different kinds of data
@@ -575,7 +597,7 @@ mod tests {
 
     /// Check that parsers work as expected
     #[test]
-    fn full_parser() {
+    fn parser() {
         // Build a pseudo-file from a set of records, use that to init a parser
         let initial_file = ["TwoPlusTwo: 5",
                             "Abc123",
