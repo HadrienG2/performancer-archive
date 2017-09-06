@@ -18,7 +18,6 @@ pub struct Parser {}
 impl Parser {
     /// Build a parser, using initial file contents for schema analysis
     pub fn new(_initial_contents: &str) -> Self {
-        // TODO: Perform initial file format validation
         Self {}
     }
 
@@ -440,7 +439,7 @@ impl SampledPayloads {
 mod tests {
     use splitter::split_line_and_run;
     use super::{ByteSize, Field, FieldStream, FieldKind, FieldStreamState,
-                RecordStream};
+                Parser, RecordStream};
 
     /// Check that label field parsing works as expected
     #[test]
@@ -562,24 +561,38 @@ mod tests {
     #[test]
     fn record_stream() {
         // Build a pseudo-file from a set of records
-        let records = ["OneRecord: 321 kB", "TwoRecords: 9786", " ", "Dafuk?"];
-        let mut pseudo_file = String::new();
-        for record in records.iter() {
-            pseudo_file.push_str(record);
-            pseudo_file.push('\n');
-        }
+        let pseudo_file = ["OneRecord: 321 kB",
+                           "TwoRecords: 9786",
+                           " ",
+                           "Dafuk?"].join("\n");
 
         // This is the associated record stream
-        let mut record_stream = RecordStream::new(&pseudo_file);
+        let record_stream = RecordStream::new(&pseudo_file);
 
         // Check that our test record stream looks as expected
-        for record in records.iter() {
-            with_field_stream(record, |mut expected_fields| {
-                let mut actual_fields = record_stream.next().unwrap();
-                assert_eq!(actual_fields.next(), expected_fields.next());
-                assert_eq!(actual_fields.next(), expected_fields.next());
-            });
-        }
+        check_record_stream(record_stream, &pseudo_file);
+    }
+
+    /// Check that parsers work as expected
+    #[test]
+    fn full_parser() {
+        // Build a pseudo-file from a set of records, use that to init a parser
+        let initial_file = ["TwoPlusTwo: 5",
+                            "Abc123",
+                            " ",
+                            "ThreeRecords: 42 kB"].join("\n");
+        let mut parser = Parser::new(&initial_file);
+
+        // Now, build another file which is a variant of the first one, and
+        // check that the parser can ingest it just fine
+        let file_contents = ["TwoPlusTwo: 9486",
+                             "Abc123",
+                             " ",
+                             "ThreeRecords: 76415 kB"].join("\n");
+        let record_stream = parser.parse(&file_contents);
+
+        // Check that our test record stream looks as expected
+        check_record_stream(record_stream, &file_contents);
     }
 
     /// Build the field stream associated with a certain line of text, and run
@@ -591,6 +604,17 @@ mod tests {
             let field_stream = FieldStream::new(columns);
             functor(field_stream)
         })
+    }
+
+    /// Test that the output of a record stream is right for a given input file
+    fn check_record_stream(mut stream: RecordStream, file_contents: &str) {
+        for record in file_contents.lines() {
+            with_field_stream(record, |mut expected_fields| {
+                let mut actual_fields = stream.next().unwrap();
+                assert_eq!(actual_fields.next(), expected_fields.next());
+                assert_eq!(actual_fields.next(), expected_fields.next());
+            });
+        }
     }
 
     // TODO: Tests need to be completely reviewed :(
