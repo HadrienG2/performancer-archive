@@ -231,28 +231,6 @@ impl<'a> Field<'a> {
         // Return the parsed counter value to our client
         counter
     }
-
-    /// Get a field that parses into a label
-    #[cfg(test)]
-    fn with_label<F, R>(label: &str, operation: F) -> R
-        where F: FnOnce(Field) -> R
-    {
-        // Build the label's tag
-        let mut label_tag = String::with_capacity(label.len()+1);
-        label_tag.push_str(label);
-        label_tag.push(':');
-
-        // Create a corresponding field struct
-        let field = Field {
-            file_columns: [Some(&label_tag), None],
-            stream_state: FieldStreamState::OnLabel,
-        };
-
-        // Run the user-provided functor on that field and return the result
-        operation(field)
-    }
-
-    // TODO: Do the same for byte counters and raw counters
 }
 ///
 /// Fields of a meminfo record can feature different kinds of data
@@ -459,7 +437,8 @@ impl SampledPayloads {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    use splitter::split_line_and_run;
+    use bytesize;
+    use ::splitter::split_line_and_run;
     use super::{ByteSize, Field, FieldStream, FieldKind, FieldStreamState,
                 Parser, RecordStream};
 
@@ -467,12 +446,10 @@ mod tests {
     #[test]
     fn label_field_parsing() {
         // Supported label field
-        let valid_label = Field {
-            file_columns: [Some("MyLabel:"), None],
-            stream_state: FieldStreamState::OnLabel,
-        };
-        assert_eq!(valid_label.kind(), FieldKind::Label);
-        assert_eq!(valid_label.parse_label(), "MyLabel");
+        with_label_field("MyLabel", |valid_label| {
+            assert_eq!(valid_label.kind(), FieldKind::Label);
+            assert_eq!(valid_label.parse_label(), "MyLabel");
+        });
 
         // Missing colon
         let missing_colon = Field {
@@ -493,13 +470,11 @@ mod tests {
     #[test]
     fn payload_field_parsing() {
         // Valid data volume payload
-        let valid_data_volume = Field {
-            file_columns: [Some("713705"), Some("kB")],
-            stream_state: FieldStreamState::OnPayload,
-        };
-        assert_eq!(valid_data_volume.kind(), FieldKind::DataVolume);
-        assert_eq!(valid_data_volume.parse_data_volume(),
-                   ByteSize::kib(713705));
+        with_data_volume_field(ByteSize::kib(713705), |valid_data_volume| {
+            assert_eq!(valid_data_volume.kind(), FieldKind::DataVolume);
+            assert_eq!(valid_data_volume.parse_data_volume(),
+                       ByteSize::kib(713705));
+        });
 
         // Invalid data volume unit
         let invalid_unit = Field {
@@ -516,12 +491,10 @@ mod tests {
         assert_eq!(invalid_data_count.kind(), FieldKind::Unsupported);
 
         // Valid raw counter
-        let valid_counter = Field {
-            file_columns: [Some("911"), None],
-            stream_state: FieldStreamState::OnPayload,
-        };
-        assert_eq!(valid_counter.kind(), FieldKind::Counter);
-        assert_eq!(valid_counter.parse_counter(), 911);
+        with_counter_field(911, |valid_counter| {
+            assert_eq!(valid_counter.kind(), FieldKind::Counter);
+            assert_eq!(valid_counter.parse_counter(), 911);
+        });
 
         // Invalid raw counter
         let invalid_counter = Field {
@@ -615,6 +588,60 @@ mod tests {
 
         // Check that our test record stream looks as expected
         check_record_stream(record_stream, &file_contents);
+    }
+
+    /// Get a field that parses into a label and do something with it
+    #[cfg(test)]
+    fn with_label_field<F, R>(label: &str, operation: F) -> R
+        where F: FnOnce(Field) -> R
+    {
+        // Build the label's tag
+        let mut label_tag = String::with_capacity(label.len()+1);
+        label_tag.push_str(label);
+        label_tag.push(':');
+
+        // Create a corresponding field struct
+        let field = Field {
+            file_columns: [Some(&label_tag), None],
+            stream_state: FieldStreamState::OnLabel,
+        };
+
+        // Run the user-provided functor on that field and return the result
+        operation(field)
+    }
+
+    /// Get a field that parses into a data volume and do something with it
+    fn with_data_volume_field<F, R>(data_volume: ByteSize, operation: F) -> R
+        where F: FnOnce(Field) -> R
+    {
+        // Build the counter
+        let kib_counter = (data_volume.as_usize() / bytesize::KIB).to_string();
+
+        // Create a corresponding field struct
+        let field = Field {
+            file_columns: [Some(&kib_counter), Some("kB")],
+            stream_state: FieldStreamState::OnPayload,
+        };
+
+        // Run the user-provided functor on that field and return the result
+        operation(field)
+    }
+
+    /// Get a field that parses into a raw counter and do something with it
+    fn with_counter_field<F, R>(counter: u64, operation: F) -> R
+        where F: FnOnce(Field) -> R
+    {
+        // Build the counter
+        let raw_counter = counter.to_string();
+
+        // Create a corresponding field struct
+        let field = Field {
+            file_columns: [Some(&raw_counter), None],
+            stream_state: FieldStreamState::OnPayload,
+        };
+
+        // Run the user-provided functor on that field and return the result
+        operation(field)
     }
 
     /// Build the field stream associated with a certain line of text, and run
