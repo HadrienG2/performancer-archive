@@ -131,7 +131,7 @@ enum FieldStreamState { OnLabel, OnPayload, AtEnd }
 /// ambiguity. After the first sample, you can safely switch to calling the
 /// appropriate parse_xyz() method directly.
 ///
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Field<'a> {
     // Buffer for the record column(s) associated with this field
     file_columns: [Option<&'a str>; 2],
@@ -415,13 +415,6 @@ impl SampledPayloads {
         }
     }
 
-    /* /// For testing purposes, pushing in a string can be more convenient
-    #[cfg(test)]
-    fn push_str(&mut self, raw_data: &str) {
-        use ::splitter::split_line_and_run;
-        split_line_and_run(raw_data, |columns| self.push(columns))
-    } */
-
     /// Tell how many samples are present in the data store
     #[cfg(test)]
     fn len(&self) -> usize {
@@ -440,7 +433,7 @@ mod tests {
     use bytesize;
     use ::splitter::split_line_and_run;
     use super::{ByteSize, Field, FieldStream, FieldKind, FieldStreamState,
-                Parser, RecordStream};
+                Parser, RecordStream, SampledPayloads};
 
     /// Check that label field parsing works as expected
     #[test]
@@ -502,6 +495,46 @@ mod tests {
             stream_state: FieldStreamState::OnPayload,
         };
         assert_eq!(invalid_counter.kind(), FieldKind::Unsupported);
+    }
+
+    /// Check that sampled payloads container works as expected...
+    #[test]
+    fn sampled_payloads() {
+        /// ...with data volume payloads
+        let mut data_payloads = with_data_volume_field(ByteSize::mib(768),
+                                                       SampledPayloads::new);
+        assert_eq!(data_payloads,
+                   SampledPayloads::DataVolume(Vec::new()));
+        assert_eq!(data_payloads.len(), 0);
+        let sample_data = ByteSize::gib(2);
+        with_data_volume_field(sample_data, |field| data_payloads.push(field));
+        assert_eq!(data_payloads,
+                   SampledPayloads::DataVolume(vec![sample_data]));
+        assert_eq!(data_payloads.len(), 1);
+
+        // ...with raw counter payloads
+        let mut counter_payloads = with_counter_field(42, SampledPayloads::new);
+        assert_eq!(counter_payloads,
+                   SampledPayloads::Counter(Vec::new()));
+        assert_eq!(counter_payloads.len(), 0);
+        let sample_count = 6463;
+        with_counter_field(sample_count, |field| counter_payloads.push(field));
+        assert_eq!(counter_payloads,
+                   SampledPayloads::Counter(vec![sample_count]));
+        assert_eq!(counter_payloads.len(), 1);
+        
+        // ...and with unsupported payloads
+        let unsupported_field = Field {
+            file_columns: [None, None],
+            stream_state: FieldStreamState::OnPayload,
+        };
+        let mut unsupported_payloads =
+            SampledPayloads::new(unsupported_field.clone());
+        assert_eq!(unsupported_payloads, SampledPayloads::Unsupported(0));
+        assert_eq!(unsupported_payloads.len(), 0);
+        unsupported_payloads.push(unsupported_field);
+        assert_eq!(unsupported_payloads, SampledPayloads::Unsupported(1));
+        assert_eq!(unsupported_payloads.len(), 1);
     }
 
     /// Check that field streams work as expected...
