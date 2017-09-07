@@ -624,7 +624,6 @@ mod tests {
     }
 
     /// Get a field that parses into a label and do something with it
-    #[cfg(test)]
     fn with_label_field<F, R>(label: &str, operation: F) -> R
         where F: FnOnce(Field) -> R
     {
