@@ -127,8 +127,7 @@ impl<'a> SplitLinesBySpace<'a> {
 
         // Find the first non-space character before the end of line (if any):
         // that will be the start of the next word.
-        let first_idx;
-        loop {
+        let first_idx = loop {
             match self.char_iter.next() {
                 // Discard all the spaces along the way.
                 Some(' ') => continue,
@@ -147,8 +146,7 @@ impl<'a> SplitLinesBySpace<'a> {
 
                 // Record the index of the first non-space character
                 Some(_) => {
-                    first_idx = self.char_iter.prev_index();
-                    break;
+                    break self.char_iter.prev_index();
                 },
 
                 // Terminate when the end of the text is reached
@@ -157,7 +155,7 @@ impl<'a> SplitLinesBySpace<'a> {
                     return None;
                 },
             }
-        }
+        };
 
         // We are now inside of a word, and looking for its end. There is one
         // special scenario to take care of: if the word completes at the end
