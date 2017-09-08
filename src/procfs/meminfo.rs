@@ -433,7 +433,7 @@ mod tests {
     use bytesize;
     use ::splitter::split_line_and_run;
     use super::{ByteSize, Field, FieldStream, FieldKind, FieldStreamState,
-                Parser, RecordStream, SampledPayloads};
+                Parser, RecordStream, SampledData, SampledPayloads};
 
     /// Check that label field parsing works as expected
     #[test]
@@ -463,10 +463,10 @@ mod tests {
     #[test]
     fn payload_field_parsing() {
         // Valid data volume payload
-        with_data_volume_field(ByteSize::kib(713705), |valid_data_volume| {
+        with_data_volume_field(ByteSize::mib(713705), |valid_data_volume| {
             assert_eq!(valid_data_volume.kind(), FieldKind::DataVolume);
             assert_eq!(valid_data_volume.parse_data_volume(),
-                       ByteSize::kib(713705));
+                       ByteSize::mib(713705));
         });
 
         // Invalid data volume unit
@@ -501,7 +501,7 @@ mod tests {
     #[test]
     fn sampled_payloads() {
         /// ...with data volume payloads
-        let mut data_payloads = with_data_volume_field(ByteSize::mib(768),
+        let mut data_payloads = with_data_volume_field(ByteSize::kib(768),
                                                        SampledPayloads::new);
         assert_eq!(data_payloads,
                    SampledPayloads::DataVolume(Vec::new()));
@@ -623,6 +623,56 @@ mod tests {
         check_record_stream(record_stream, &file_contents);
     }
 
+    /// Check that sampled data works as expected
+    #[test]
+    fn sampled_data() {
+        // Let's build ourselves a fake meminfo file
+        let initial_contents = ["Something:  9876",
+                                "Somewhere:  6513 kB",
+                                "Went:       98743 kB",
+                                "Terribly:   48961",
+                                "Wrong:      5474"].join("\n");
+
+        // Build a data sampler for that file
+        let initial_records = RecordStream::new(&initial_contents);
+        let mut sampled_data = SampledData::new(initial_records);
+        assert_eq!(sampled_data, SampledData {
+            data: vec![SampledPayloads::Counter(Vec::new()),
+                       SampledPayloads::DataVolume(Vec::new()),
+                       SampledPayloads::DataVolume(Vec::new()),
+                       SampledPayloads::Counter(Vec::new()),
+                       SampledPayloads::Counter(Vec::new())],
+            keys: vec!["Something".to_string(),
+                       "Somewhere".to_string(),
+                       "Went".to_string(),
+                       "Terribly".to_string(),
+                       "Wrong".to_string()]
+        });
+        assert_eq!(sampled_data.len(), 0);
+
+        // Try to acquire one data sample and see how well that works out
+        let file_contents = ["Something:  9876",
+                             "Somewhere:  6514 kB",
+                             "Went:       98753 kB",
+                             "Terribly:   50161",
+                             "Wrong:      6484"].join("\n");
+        let file_records = RecordStream::new(&file_contents);
+        sampled_data.push(file_records);
+        assert_eq!(sampled_data, SampledData {
+            data: vec![SampledPayloads::Counter(vec![9876]),
+                       SampledPayloads::DataVolume(vec![ByteSize::kib(6514)]),
+                       SampledPayloads::DataVolume(vec![ByteSize::kib(98753)]),
+                       SampledPayloads::Counter(vec![50161]),
+                       SampledPayloads::Counter(vec![6484])],
+            keys: vec!["Something".to_string(),
+                       "Somewhere".to_string(),
+                       "Went".to_string(),
+                       "Terribly".to_string(),
+                       "Wrong".to_string()]
+        });
+        assert_eq!(sampled_data.len(), 1);
+    }
+
     /// Get a field that parses into a label and do something with it
     fn with_label_field<F, R>(label: &str, operation: F) -> R
         where F: FnOnce(Field) -> R
@@ -698,120 +748,8 @@ mod tests {
         }
     }
 
-    // TODO: Tests need to be completely reviewed :(
-
-    /* /// Check that meminfo record initialization works well
-    #[test]
-    fn init_record() {
-        // Data volume record
-        let data_vol_record = build_record("42 kB");
-        assert_eq!(data_vol_record, MemInfoPayloads::DataVolume(Vec::new()));
-        assert_eq!(data_vol_record.len(), 0);
-
-        // Counter record
-        let counter_record = build_record("713705");
-        assert_eq!(counter_record, MemInfoPayloads::Counter(Vec::new()));
-        assert_eq!(counter_record.len(), 0);
-
-        // Unsupported record
-        let bad_record = build_record("73 MiB");
-        assert_eq!(bad_record, MemInfoPayloads::Unsupported(0));
-        assert_eq!(bad_record.len(), 0);
-    }
-
-    /// Check that meminfo record parsing works well
-    #[test]
-    fn parse_record() {
-        // Data volume record
-        let mut size_record = build_record("24 kB");
-        size_record.push_str("512 kB");
-        assert_eq!(size_record,
-                   MemInfoPayloads::DataVolume(vec![ByteSize::kib(512)]));
-        assert_eq!(size_record.len(), 1);
-
-        // Counter record
-        let mut counter_record = build_record("1337");
-        counter_record.push_str("371830");
-        assert_eq!(counter_record,
-                   MemInfoPayloads::Counter(vec![371830]));
-        assert_eq!(counter_record.len(), 1);
-
-        // Unsupported record
-        let mut bad_record = build_record("57 TiB");
-        bad_record.push_str("332 PiB");
-        assert_eq!(bad_record, MemInfoPayloads::Unsupported(1));
-        assert_eq!(bad_record.len(), 1);
-    }
-
-    /// Check that meminfo data initialization works as expected
-    #[test]
-    fn init_meminfo_data() {
-        // Starting with an empty file (should never happen, but good base case)
-        let mut info = String::new();
-        let empty_info = MemInfoData::new(&info);
-        assert_eq!(empty_info.data.len(), 0);
-        assert_eq!(empty_info.keys.len(), 0);
-        assert_eq!(empty_info.len(), 0);
-        let mut expected = empty_info;
-
-        // ...adding a first line of memory info...
-        info.push_str("MyDataVolume:   1234 kB");
-        let single_info = MemInfoData::new(&info);
-        expected.data.push(MemInfoPayloads::DataVolume(Vec::new()));
-        expected.keys.push("MyDataVolume".to_owned());
-        assert_eq!(single_info, expected);
-        assert_eq!(expected.len(), 0);
-
-        // ...and a second line of memory info.
-        info.push_str("\nMyCounter:   42");
-        let double_info = MemInfoData::new(&info);
-        expected.data.push(MemInfoPayloads::Counter(Vec::new()));
-        expected.keys.push("MyCounter".to_owned());
-        assert_eq!(double_info, expected);
-        assert_eq!(expected.len(), 0);
-    }
-
-    /// Check that meminfo data parsing works well
-    #[test]
-    fn parse_meminfo_data() {
-        // Starting with an empty file (should never happen, but good base case)
-        let mut info = String::new();
-        let mut empty_info = MemInfoData::new(&info);
-        empty_info.push(&info);
-        let mut expected = MemInfoData::new(&info);
-        assert_eq!(empty_info, expected);
-
-        // ...adding a first line of memory info...
-        info.push_str("MyDataVolume:   1234 kB");
-        let mut single_info = MemInfoData::new(&info);
-        single_info.push(&info);
-        expected = MemInfoData::new(&info);
-        expected.data[0].push_str("1234 kB");
-        assert_eq!(single_info, expected);
-        assert_eq!(expected.len(), 1);
-
-        // ...and a second line of memory info.
-        info.push_str("\nMyCounter:   42");
-        let mut double_info = MemInfoData::new(&info);
-        double_info.push(&info);
-        expected = MemInfoData::new(&info);
-        expected.data[0].push_str("1234 kB");
-        expected.data[1].push_str("42");
-        assert_eq!(double_info, expected);
-        assert_eq!(expected.len(), 1);
-    } */
-
     /// Check that the sampler works well
     define_sampler_tests!{ super::Sampler }
-
-    /* /// INTERNAL: Build a MemInfoPayloads using columns from a certain string
-    fn build_record(input: &str) -> MemInfoPayloads {
-        split_line_and_run(input, |columns| {
-            let mut stream = MemInfoRecordStream::new(columns);
-            stream.fetch();
-            MemInfoPayloads::new(stream)
-        })
-    } */
 }
 
 

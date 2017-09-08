@@ -147,6 +147,7 @@ pub trait PseudoFileParser {
 /// This macro should be invoked inside of the module associated with the unit
 /// tests for a certain pseudo-file.
 ///
+#[cfg(test)]
 macro_rules! define_sampler_tests {
     ($sampler:ty) => {
         /// Check that sampler initialization works well
@@ -179,6 +180,7 @@ macro_rules! define_sampler_tests {
 /// The macro parameters are the sampler type, the path to the associated
 /// pseudo-file, and the number of benchmark iterations to be carried out.
 ///
+#[cfg(test)]
 macro_rules! define_sampler_benchs {
     ($sampler:ty, $file_location:expr, $bench_iters:expr) => {
         use ::reader::ProcFileReader;
