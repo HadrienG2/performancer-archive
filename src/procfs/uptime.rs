@@ -20,7 +20,7 @@ define_sampler!{ Sampler : "/proc/uptime" => Parser => SampledData }
 /// The idea behind having two separate Parser and Stream components is that it
 /// allows the parser to cache long-lived metadata about the file being parsed.
 ///
-struct Parser {}
+pub struct Parser {}
 //
 impl Parser {
     /// Build a parser, using initial file contents for schema analysis
@@ -51,7 +51,7 @@ impl Parser {
 /// * The idle time (total CPU time spent in the idle state)
 /// * A None terminator
 ///
-struct FieldStream<'a> {
+pub struct FieldStream<'a> {
     /// Extracted columns from /proc/uptime
     file_columns: SplitWhitespace<'a>,
 }
