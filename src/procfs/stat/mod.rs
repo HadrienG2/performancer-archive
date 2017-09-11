@@ -15,6 +15,125 @@ use std::str::FromStr;
 define_sampler!{ Sampler : "/proc/stat" => SampledData }
 
 
+/// Streaming parser for /proc/stat
+///
+/// TODO: Decide whether a more extensive description is needed
+///
+pub struct Parser {}
+//
+impl Parser {
+    /// Build a parser, using initial file contents for schema analysis
+    pub fn new(_initial_contents: &str) -> Self {
+        Self {}
+    }
+
+    /// Parse a pseudo-file sample into a stream of records
+    pub fn parse<'a>(&mut self, file_contents: &'a str) -> RecordStream<'a> {
+        RecordStream::new(file_contents)
+    }
+}
+///
+///
+/// Stream of records from /proc/stat
+///
+/// This streaming iterator should yield a stream of records, each representing
+/// a line of /proc/stat (i.e. a named homogeneous dataset, like CPU activity
+/// counters or interrupt counters).
+///
+pub struct RecordStream<'a> {
+    /// Iterator into the lines and columns of /proc/stat
+    file_lines: SplitLinesBySpace<'a>,
+}
+//
+impl<'a> RecordStream<'a> {
+    /// Extract the next record from /proc/stat
+    pub fn next<'b>(&'b mut self) -> Option<Record<'a, 'b>>
+        where 'a: 'b
+    {
+        self.file_lines.next().map(Record::new)
+    }
+
+    /// Create a record stream from raw contents
+    fn new(file_contents: &'a str) -> Self {
+        Self {
+            file_lines: SplitLinesBySpace::new(file_contents),
+        }
+    }
+}
+///
+///
+/// Parseable record from /proc/stat
+///
+/// This represents Ima line of /proc/stat, which may contain various kinds of
+/// data. Use the kind() method of this type to identify what kind of supported
+/// data is stored in this record, if any.
+///
+/// After the first sample, you may switch to calling the appropriate
+/// parse_xyz() method directly *if* you do not intend to support kernel version
+/// changes or CPU hotplug. Otherwise, you will want to continue checking a
+/// record's kind() on every sample, as the schema can change on these events.
+///
+pub struct Record<'a, 'b> where 'a: 'b {
+    /// Header of the record, used to identify what kind of record it is
+    header: &'a str,
+
+    /// Data columns of the record, to be handed to a record-specific parser
+    data_columns: SplitColumns<'a, 'b>,
+}
+//
+impl<'a, 'b> Record<'a, 'b> {
+    /// Tell how the active record should be parsed (if at all)
+    fn kind(&self) -> RecordKind {
+        match self.header {
+            /// The header of global or per-core CPU stats starts with "cpu"
+            cpu_header if &cpu_header[0..3] == "cpu" => {
+                if cpu_header.len() == 3 {
+                    // If it's just "cpu", we're dealing with global CPU stats
+                    RecordKind::CPUTotal
+                } else {
+                    // If it's followed by a numerical identifier, we're
+                    // dealing with per-core CPU stats
+                    if let Ok(cpu_id) = cpu_header[3..].parse::<u16>() {
+                        RecordKind::CPUCore(cpu_id)
+                    } else {
+                        RecordKind::Unsupported
+                    }
+                }
+            },
+
+            // TODO: Add remaining record types
+
+            /// This header is not supported
+            _ => RecordKind::Unsupported
+        }
+    }
+
+    // TODO: Parsers for each kind() of record
+
+    /// Construct a new record from associated file columns
+    fn new(mut file_columns: SplitColumns<'a, 'b>) -> Self {
+        Self {
+            header: file_columns.next().expect("Missing record header"),
+            data_columns: file_columns,
+        }
+    }
+}
+///
+/// Records from /proc/stat can feature different kinds of statistical data
+pub enum RecordKind {
+    /// Total CPU usage
+    CPUTotal,
+
+    /// Single (virtual) CPU core usage, with the core's numerical identifier
+    CPUCore(u16),
+
+    // TODO: Add remaining record types
+
+    /// Some record type unsupported by this parser :-(
+    Unsupported,
+}
+
+
 /// Data samples from /proc/stat, in structure-of-array layout
 ///
 /// Courtesy of Linux's total lack of promises regarding the variability of

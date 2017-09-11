@@ -128,15 +128,18 @@ enum FieldStreamState { OnLabel, OnPayload, AtEnd }
 ///
 /// Use the kind() method in order to analyze the /proc/meminfo schema, check
 /// the parser's assumptions, and eliminate the data volume vs counter parsing
-/// ambiguity. After the first sample, you can safely switch to calling the
-/// appropriate parse_xyz() method directly.
+/// ambiguity.
+///
+/// After the first sample, you can safely switch to calling the appropriate
+/// parse_xyz() method directly, since new meminfo records are always added at
+/// the end of the file, and records are never removed.
 ///
 #[derive(Clone, Debug, PartialEq)]
 pub struct Field<'a> {
-    // Buffer for the record column(s) associated with this field
+    /// Buffer for the record column(s) associated with this field
     file_columns: [Option<&'a str>; 2],
 
-    // What kind of field was expected by the parent stream
+    /// What kind of field was expected by the parent stream
     stream_state: FieldStreamState,
 }
 ///
