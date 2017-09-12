@@ -70,8 +70,8 @@ impl<'a> RecordStream<'a> {
 ///
 /// After the first sample, you may switch to calling the appropriate
 /// parse_xyz() method directly *if* you do not intend to support kernel version
-/// changes or CPU hotplug. Otherwise, you will want to continue checking a
-/// record's kind() on every sample, as the schema can change on these events.
+/// changes or CPU hotplug. Otherwise, you will want to use has_kind() in order
+/// to check for schema changes, which can occur on these events.
 ///
 pub struct Record<'a, 'b> where 'a: 'b {
     /// Header of the record, used to identify what kind of record it is
@@ -96,7 +96,7 @@ impl<'a, 'b> Record<'a, 'b> {
                     if let Ok(cpu_id) = cpu_header[3..].parse::<u16>() {
                         RecordKind::CPUCore(cpu_id)
                     } else {
-                        RecordKind::Unsupported
+                        RecordKind::Unsupported(cpu_header.to_owned())
                     }
                 }
             },
@@ -104,7 +104,31 @@ impl<'a, 'b> Record<'a, 'b> {
             // TODO: Add remaining record types
 
             /// This header is not supported
-            _ => RecordKind::Unsupported
+            other_header => RecordKind::Unsupported(other_header.to_owned())
+        }
+    }
+
+    /// Check if the active record is of a certain kind
+    ///
+    /// This operation is faster than calling kind() and comparing the result.
+    /// It is intended to be used in order to check whether the /proc/stat
+    /// schema has changed, e.g. due to a kernel update or CPU hotplug event.
+    ///
+    fn has_kind(&self, kind: &RecordKind) -> bool {
+        match *kind {
+            // Check for global CPU stats
+            RecordKind::CPUTotal => (self.header == "cpu"),
+
+            // Check for per-core CPU stats
+            RecordKind::CPUCore(cpu_id) => {
+                (&self.header[0..3] == "cpu") &&
+                (self.header[4..].parse() == Ok(cpu_id))
+            },
+
+            // TODO: Add remaining record types
+
+            // Check for unsupported headers
+            RecordKind::Unsupported(ref header) => (self.header == header)
         }
     }
 
@@ -130,7 +154,11 @@ pub enum RecordKind {
     // TODO: Add remaining record types
 
     /// Some record type unsupported by this parser :-(
-    Unsupported,
+    ///
+    /// Comes with the associated header, so we can check that at least it
+    /// did not change from one parsing pass to the next.
+    ///
+    Unsupported(String),
 }
 
 
