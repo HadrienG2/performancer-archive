@@ -93,7 +93,7 @@ impl<'a, 'b> Record<'a, 'b> {
                 } else {
                     // If it's followed by a numerical identifier, we're
                     // dealing with per-core CPU stats
-                    if let Ok(cpu_id) = cpu_header[3..].parse::<u16>() {
+                    if let Ok(cpu_id) = cpu_header[3..].parse() {
                         RecordKind::CPUCore(cpu_id)
                     } else {
                         RecordKind::Unsupported(cpu_header.to_owned())
@@ -148,14 +148,19 @@ pub enum RecordKind {
     /// Total CPU usage
     CPUTotal,
 
-    /// Single (virtual) CPU core usage, with the core's numerical identifier
+    /// Single (virtual) CPU core usage, with the core's numerical identifier.
+    ///
+    /// As of 2017, where CPUs with a little more than 256 threads have just
+    /// started to appear in HPC centers, a 16-bit ID appears both necessary
+    /// and sufficient for storing Linux' virtual CPU core IDs.
+    ///
     CPUCore(u16),
 
     // TODO: Add remaining record types
 
     /// Some record type unsupported by this parser :-(
     ///
-    /// Comes with the associated header, so we can check that at least it
+    /// Comes with the associated header, so that we can check that at least it
     /// did not change from one parsing pass to the next.
     ///
     Unsupported(String),
