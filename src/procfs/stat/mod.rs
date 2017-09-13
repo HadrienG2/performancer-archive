@@ -101,7 +101,33 @@ impl<'a, 'b> Record<'a, 'b> {
                 }
             },
 
-            // TODO: Add remaining record types
+            /// The header of paging statistics is "page" or "swap"
+            "page" => RecordKind::PagingTotal,
+            "swap" => RecordKind::PagingSwap,
+
+            /// The header of hardware IRQ activity is "intr"
+            "intr" => RecordKind::InterruptsHW,
+
+            /// The header of the context switch counter is "ctxt"
+            "ctxt" => RecordKind::ContextSwitches,
+
+            /// The header of the boot time is "btime"
+            "btime" => RecordKind::BootTime,
+
+            /// The header of total process forking activity is "processes"
+            "processes" => RecordKind::ProcessForks,
+
+            /// Current process activity has a header starting with "procs_"
+            procs_header if &procs_header[0..6] == "procs_" => {
+                match &procs_header[6..] {
+                    "running" => RecordKind::ProcessesRunnable,
+                    "blocked" => RecordKind::ProcessesBlocked,
+                    _ => RecordKind::Unsupported(procs_header.to_owned())
+                }
+            }
+
+            /// The header of software IRQ activity is "softirq"
+            "softirq" => RecordKind::InterruptsSW,
 
             /// This header is not supported
             other_header => RecordKind::Unsupported(other_header.to_owned())
@@ -125,7 +151,28 @@ impl<'a, 'b> Record<'a, 'b> {
                 (self.header[4..].parse() == Ok(cpu_id))
             },
 
-            // TODO: Add remaining record types
+            /// Check for paging statistics
+            RecordKind::PagingTotal => (self.header == "page"),
+            RecordKind::PagingSwap => (self.header == "swap"),
+
+            /// Check for hardware IRQ acticity
+            RecordKind::InterruptsHW => (self.header == "intr"),
+
+            /// Check for context switch counter
+            RecordKind::ContextSwitches => (self.header == "ctxt"),
+
+            /// Check for the boot time
+            RecordKind::BootTime => (self.header == "btime"),
+
+            /// Check for total process forking activity
+            RecordKind::ProcessForks => (self.header == "processes"),
+
+            /// Check for current process activity
+            RecordKind::ProcessesRunnable => (self.header == "procs_running"),
+            RecordKind::ProcessesBlocked => (self.header == "procs_blocked"),
+
+            /// Check for software IRQ activity
+            RecordKind::InterruptsSW => (self.header == "softirq"),
 
             // Check for unsupported headers
             RecordKind::Unsupported(ref header) => (self.header == header)
@@ -156,7 +203,32 @@ pub enum RecordKind {
     ///
     CPUCore(u16),
 
-    // TODO: Add remaining record types
+    /// Total paging activity to and from disk
+    PagingTotal,
+
+    /// Paging activity that is specifically related to swap usage
+    PagingSwap,
+
+    /// Interrupt actvity of hardware IRQs
+    InterruptsHW,
+
+    /// Number of context switches since boot
+    ContextSwitches,
+
+    /// System boot time
+    BootTime,
+
+    /// Number of spawned processes (forks) since boot
+    ProcessForks,
+
+    /// Number of processes which are currently in a runnable state
+    ProcessesRunnable,
+
+    /// Number of processes which are currently blocked waiting for I/O
+    ProcessesBlocked,
+
+    /// Interrupt activity of software IRQs ("softirqs")
+    InterruptsSW,
 
     /// Some record type unsupported by this parser :-(
     ///
