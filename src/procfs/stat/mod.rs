@@ -179,6 +179,18 @@ impl<'a, 'b> Record<'a, 'b> {
         }
     }
 
+    /// Parse the current record as global or per-core CPU stats
+    fn parse_cpu(self) -> cpu::RecordFields<'a, 'b> {
+        // In debug mode, check that we are indeed dealing with CPU stats
+        debug_assert!(match self.kind() {
+            RecordKind::CPUTotal | RecordKind::CPUCore(_) => true,
+            _ => false
+        });
+
+        // Delegate the parsing to the dedicated "cpu" submodule
+        cpu::RecordFields::new(self.data_columns)
+    }
+
     // TODO: Parsers for each kind() of record
 
     /// Construct a new record from associated file columns

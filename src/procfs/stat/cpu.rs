@@ -7,6 +7,79 @@ use std::time::Duration;
 use super::StatDataStore;
 
 
+/// CPU statistics record from /proc/stat
+///
+/// This will yield the amount of CPU time that the system (or one of its CPU
+/// cores) spent in various states.
+///
+/// Some timings were added in a certain Linux release and will only be provided
+/// by sufficiently recent kernels. You will find the associated kernel version
+/// requirements below, and can use the "version" module of this package to
+/// check if they are met by the host kernel.
+///
+/// * user time (spent in a user mode process)
+/// * nice time (spent in a user mode process, running with low priority)
+/// * system time (spent in system mode, running kernel code)
+/// * idle time (spent doing nothing, "in the idle task")
+/// * iowait time (mostly deprecated and meaningless today, used to be a measure
+///   of the time spent waiting for I/O to complete) \[Linux 2.5.41+\]
+/// * irq time (spent servicing hardware interrupts) \[Linux 2.6.0-test4+\]
+/// * softirq time (spent servicing software interrupts) \[Linux 2.6.0-test4+\]
+/// * steal time (spent in other OSs, when virtualized) \[Linux 2.6.11+\]
+/// * guest time (spent running a guest virtualized OS) \[Linux 2.6.24+\]
+/// * guest_nice (spent running a guast, with low priority) \[Linux 2.6.33+\]
+///
+pub(super) struct RecordFields<'a, 'b> where 'a: 'b {
+    /// Data columns of the record, interpreted as CPU timings
+    data_columns: SplitColumns<'a, 'b>,
+
+    /// Number of clock ticks in one nanosecond (cached from TICKS_PER_SEC)
+    ticks_per_sec: u64,
+
+    /// Number of nanoseconds in one clock tick (cached from NANOSECS_PER_TICK)
+    nanosecs_per_tick: u64,
+}
+//
+impl<'a, 'b> Iterator for RecordFields<'a, 'b> {
+    /// We're outputting real time durations
+    type Item = Duration;
+
+    /// This is how we generate them from file columns
+    fn next(&mut self) -> Option<Self::Item> {
+        self.data_columns.next().map(|str_duration| {
+            let ticks: u64 =
+                str_duration.parse()
+                            .expect("Failed to parse CPU tick counter");
+            let secs = ticks / self.ticks_per_sec;
+            let nanosecs =
+                (ticks % self.ticks_per_sec) * self.nanosecs_per_tick;
+            Duration::new(secs, nanosecs as u32)
+        })
+    }
+}
+//
+impl<'a, 'b> RecordFields<'a, 'b> {
+    /// Build a new parser for CPU record fields
+    pub fn new(data_columns: SplitColumns<'a, 'b>) -> Self {
+        Self {
+            data_columns,
+            ticks_per_sec: *TICKS_PER_SEC,
+            nanosecs_per_tick: *NANOSECS_PER_TICK,
+        }
+    }
+}
+//
+lazy_static! {
+    /// Number of CPU ticks from the statistics of /proc/stat in one second
+    static ref TICKS_PER_SEC: u64 = unsafe {
+        libc::sysconf(libc::_SC_CLK_TCK) as u64
+    };
+
+    /// Number of nanoseconds in one CPU tick
+    static ref NANOSECS_PER_TICK: u64 = 1_000_000_000 / *TICKS_PER_SEC;
+}
+
+
 /// The amount of CPU time that the system spent in various states
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct SampledData {
@@ -146,16 +219,6 @@ impl StatDataStore for SampledData {
         // Return the overall length
         length
     }
-}
-//
-lazy_static! {
-    /// Number of CPU ticks from the statistics of /proc/stat in one second
-    static ref TICKS_PER_SEC: u64 = unsafe {
-        libc::sysconf(libc::_SC_CLK_TCK) as u64
-    };
-
-    /// Number of nanoseconds in one CPU tick
-    static ref NANOSECS_PER_TICK: u64 = 1_000_000_000 / *TICKS_PER_SEC;
 }
 
 
