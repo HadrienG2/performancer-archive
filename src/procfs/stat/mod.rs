@@ -226,6 +226,30 @@ impl<'a, 'b> Record<'a, 'b> {
                          .parse().expect("Failed to parse context switches")
     }
 
+    /// Parse the current record as a boot time
+    fn parse_boot_time(mut self) -> DateTime<Utc> {
+        // In debug mode, check that we don't misinterpret things
+        debug_assert_eq!(self.kind(), RecordKind::BootTime);
+
+        // Boot times are provided in seconds since the UNIX UTC epoch
+        Utc.timestamp(
+            self.data_columns.next().expect("Expected boot time")
+                             .parse().expect("Boot time should be an integer"),
+            0
+        )
+    }
+
+    /// Parse the current record as a process fork counter
+    fn parse_process_forks(mut self) -> u32 {
+        // In debug mode, check that we don't misinterpret things
+        debug_assert_eq!(self.kind(), RecordKind::ProcessForks);
+
+        // Spawning four billion processes seems somewhat unusual for the uptime
+        // of a typical UNIX machine, so I think we can stick with u32 here
+        self.data_columns.next().expect("Expected process fork counter")
+                         .parse().expect("Failed to parse fork counter")
+    }
+
     // TODO: Parsers for each kind() of record
 
     /// Construct a new record from associated file columns
