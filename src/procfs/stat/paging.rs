@@ -31,7 +31,7 @@ impl<'a, 'b> Iterator for RecordFields<'a, 'b> {
 }
 //
 impl<'a, 'b> RecordFields<'a, 'b> {
-    /// Build a new parser for CPU record fields
+    /// Build a new parser for paging record fields
     pub fn new(data_columns: SplitColumns<'a, 'b>) -> Self {
         Self {
             data_columns,

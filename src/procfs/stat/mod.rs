@@ -1,7 +1,7 @@
 //! This module contains a sampling parser for /proc/stat
 
 mod cpu;
-mod interrupt;
+mod interrupts;
 mod paging;
 
 use ::sampler::PseudoFileParser;
@@ -203,6 +203,18 @@ impl<'a, 'b> Record<'a, 'b> {
         paging::RecordFields::new(self.data_columns)
     }
 
+    /// Parse the current record as hardware or software interrupt statistics
+    fn parse_interrupts(self) -> interrupts::RecordFields<'a, 'b> {
+        /// In debug mode, check that we are indeed dealing with paging stats
+        debug_assert!(match self.kind() {
+            RecordKind::InterruptsHW | RecordKind::InterruptsSW => true,
+            _ => false
+        });
+
+        // Delegate the parsing to the dedicated "interrupts" submodule
+        interrupts::RecordFields::new(self.data_columns)
+    }
+
     // TODO: Parsers for each kind() of record
 
     /// Construct a new record from associated file columns
@@ -289,7 +301,7 @@ struct SampledData {
     swapping: Option<paging::SampledData>,
 
     /// Statistics on the number of hardware interrupts that were serviced
-    interrupts: Option<interrupt::SampledData>,
+    interrupts: Option<interrupts::SampledData>,
 
     // NOTE: Linux 2.4 used to have disk_io statistics in /proc/stat as well,
     //       but since that is incredibly ancient, we propose not to support it.
@@ -312,7 +324,7 @@ struct SampledData {
     /// Statistics on the number of softirqs that were serviced. These use the
     /// same layout as hardware interrupt stats, where softirqs are enumerated
     /// in the same order as in /proc/softirq.
-    softirqs: Option<interrupt::SampledData>,
+    softirqs: Option<interrupts::SampledData>,
 
     /// INTERNAL: This vector indicates how each line of /proc/stat maps to the
     /// members of this struct. It basically is a legal and move-friendly
@@ -390,7 +402,7 @@ impl PseudoFileParser for SampledData {
                 "intr" => {
                     let num_interrupts = (columns.count() - 1) as u16;
                     data.interrupts = Some(
-                        interrupt::SampledData::new(num_interrupts)
+                        interrupts::SampledData::new(num_interrupts)
                     );
                     data.line_target.push(StatDataMember::Interrupts);
                 },
@@ -439,7 +451,7 @@ impl PseudoFileParser for SampledData {
                 "softirq" => {
                     let num_interrupts = (columns.count() - 1) as u16;
                     data.softirqs = Some(
-                        interrupt::SampledData::new(num_interrupts)
+                        interrupts::SampledData::new(num_interrupts)
                     );
                     data.line_target.push(StatDataMember::SoftIRQs);
                 },
@@ -667,7 +679,7 @@ impl<T, U> StatDataStore for Vec<T>
 mod tests {
     use chrono::{TimeZone, Utc};
     use super::{PseudoFileParser, SampledData, StatDataMember, StatDataStore};
-    use super::{cpu, interrupt, paging};
+    use super::{cpu, interrupts, paging};
 
     /// Check that scalar statistics parsing works as expected
     #[test]
@@ -735,7 +747,7 @@ mod tests {
         // ...adding interrupt stats
         stats.push_str("\nintr 12345 678 910");
         let interrupt_stats = SampledData::new(&stats);
-        expected.interrupts = Some(interrupt::SampledData::new(2));
+        expected.interrupts = Some(interrupts::SampledData::new(2));
         expected.line_target.push(StatDataMember::Interrupts);
         assert_eq!(interrupt_stats, expected);
         assert_eq!(expected.len(), 0);
@@ -783,7 +795,7 @@ mod tests {
         // ...adding softirq stats
         stats.push_str("\nsoftirq 94651 1561 21211 12 71867");
         let softirq_stats = SampledData::new(&stats);
-        expected.softirqs = Some(interrupt::SampledData::new(4));
+        expected.softirqs = Some(interrupts::SampledData::new(4));
         expected.line_target.push(StatDataMember::SoftIRQs);
         assert_eq!(softirq_stats, expected);
         assert_eq!(expected.len(), 0);

@@ -5,6 +5,49 @@ use ::splitter::SplitColumns;
 use super::StatDataStore;
 
 
+/// Interrupt statistics record from /proc/stat
+///
+/// For either hardware or software interrupts, this iterator should yield...
+///
+/// * The total amount of interrupts of this kind that were serviced
+/// * A breakdown of the interrupts that were serviced for each "numbered"
+///   interrupt source known to the kernel
+/// * A None terminator
+///
+pub(super) struct RecordFields<'a, 'b> where 'a: 'b {
+    /// Data columns of the record, interpreted as paging statistics
+    data_columns: SplitColumns<'a, 'b>,
+}
+//
+impl<'a, 'b> Iterator for RecordFields<'a, 'b> {
+    /// We're outputting 64-bit counters
+    type Item = u64;
+
+    /// This is how we generate them from file columns
+    fn next(&mut self) -> Option<Self::Item> {
+        self.data_columns.next().map(|str_counter| {
+            // On some architectures such as x86_64, there are many possible
+            // interrupt sources and most of them will never fire. Special-
+            // casing zero interrupt counts will thus speed up parsing.
+            if str_counter == "0" {
+                0
+            } else {
+                str_counter.parse().expect("Failed to parse interrupt counter")
+            }
+        })
+    }
+}
+//
+impl<'a, 'b> RecordFields<'a, 'b> {
+    /// Build a new parser for interrupt record fields
+    pub fn new(data_columns: SplitColumns<'a, 'b>) -> Self {
+        Self {
+            data_columns,
+        }
+    }
+}
+
+
 /// Interrupt statistics from /proc/stat, in structure-of-array layout
 #[derive(Debug, PartialEq)]
 pub(super) struct SampledData {
