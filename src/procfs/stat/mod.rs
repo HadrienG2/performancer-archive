@@ -181,7 +181,7 @@ impl<'a, 'b> Record<'a, 'b> {
 
     /// Parse the current record as global or per-core CPU stats
     fn parse_cpu(self) -> cpu::RecordFields<'a, 'b> {
-        // In debug mode, check that we are indeed dealing with CPU stats
+        // In debug mode, check that we don't misinterpret things
         debug_assert!(match self.kind() {
             RecordKind::CPUTotal | RecordKind::CPUCore(_) => true,
             _ => false
@@ -193,7 +193,7 @@ impl<'a, 'b> Record<'a, 'b> {
 
     /// Parse the current record as paging or swapping statistics
     fn parse_paging(self) -> paging::RecordFields<'a, 'b> {
-        /// In debug mode, check that we are indeed dealing with paging stats
+        // In debug mode, check that we don't misinterpret things
         debug_assert!(match self.kind() {
             RecordKind::PagingTotal | RecordKind::PagingSwap => true,
             _ => false
@@ -205,7 +205,7 @@ impl<'a, 'b> Record<'a, 'b> {
 
     /// Parse the current record as hardware or software interrupt statistics
     fn parse_interrupts(self) -> interrupts::RecordFields<'a, 'b> {
-        /// In debug mode, check that we are indeed dealing with paging stats
+        // In debug mode, check that we don't misinterpret things
         debug_assert!(match self.kind() {
             RecordKind::InterruptsHW | RecordKind::InterruptsSW => true,
             _ => false
@@ -213,6 +213,17 @@ impl<'a, 'b> Record<'a, 'b> {
 
         // Delegate the parsing to the dedicated "interrupts" submodule
         interrupts::RecordFields::new(self.data_columns)
+    }
+
+    /// Parse the current record as a context switch counter
+    fn parse_context_switches(mut self) -> u64 {
+        // In debug mode, check that we don't misinterpret things
+        debug_assert_eq!(self.kind(), RecordKind::ContextSwitches);
+
+        // Context switches happen rather frequently (up to 10k/second), so
+        // anything less than a 64-bit counter would be unwise for this quantity
+        self.data_columns.next().expect("Expected context switch counter")
+                         .parse().expect("Failed to parse context switches")
     }
 
     // TODO: Parsers for each kind() of record
@@ -227,6 +238,7 @@ impl<'a, 'b> Record<'a, 'b> {
 }
 ///
 /// Records from /proc/stat can feature different kinds of statistical data
+#[derive(Debug, PartialEq)]
 pub enum RecordKind {
     /// Total CPU usage
     CPUTotal,
