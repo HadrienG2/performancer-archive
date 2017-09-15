@@ -5,6 +5,41 @@ use splitter::SplitColumns;
 use super::StatDataStore;
 
 
+/// Paging statistics record from /proc/stat
+///
+/// For the paging scenario of interest, this iterator should yield...
+///
+/// * The amount of memory pages that were brought in from disk
+/// * The amount of memory pages that were sent out to disk
+/// * A None terminator
+///
+pub(super) struct RecordFields<'a, 'b> where 'a: 'b {
+    /// Data columns of the record, interpreted as paging statistics
+    data_columns: SplitColumns<'a, 'b>,
+}
+//
+impl<'a, 'b> Iterator for RecordFields<'a, 'b> {
+    /// We're outputting 64-bit counters
+    type Item = u64;
+
+    /// This is how we generate them from file columns
+    fn next(&mut self) -> Option<Self::Item> {
+        self.data_columns.next().map(|str_counter| {
+            str_counter.parse().expect("Failed to parse paging counter")
+        })
+    }
+}
+//
+impl<'a, 'b> RecordFields<'a, 'b> {
+    /// Build a new parser for CPU record fields
+    pub fn new(data_columns: SplitColumns<'a, 'b>) -> Self {
+        Self {
+            data_columns,
+        }
+    }
+}
+
+
 /// Storage paging ativity statistics
 #[derive(Debug, PartialEq)]
 pub(super) struct SampledData {

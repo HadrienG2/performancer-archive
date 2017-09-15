@@ -191,6 +191,18 @@ impl<'a, 'b> Record<'a, 'b> {
         cpu::RecordFields::new(self.data_columns)
     }
 
+    /// Parse the current record as paging or swapping statistics
+    fn parse_paging(self) -> paging::RecordFields<'a, 'b> {
+        /// In debug mode, check that we are indeed dealing with paging stats
+        debug_assert!(match self.kind() {
+            RecordKind::PagingTotal | RecordKind::PagingSwap => true,
+            _ => false
+        });
+
+        // Delegate the parsing to the dedicated "paging" submodule
+        paging::RecordFields::new(self.data_columns)
+    }
+
     // TODO: Parsers for each kind() of record
 
     /// Construct a new record from associated file columns
