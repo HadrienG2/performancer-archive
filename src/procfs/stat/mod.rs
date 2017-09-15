@@ -250,7 +250,21 @@ impl<'a, 'b> Record<'a, 'b> {
                          .parse().expect("Failed to parse fork counter")
     }
 
-    // TODO: Parsers for each kind() of record
+    /// Parse the current record as a counter of live processes
+    fn parse_processes(mut self) -> u16 {
+        // In debug mode, check that we don't misinterpret things
+        debug_assert!(match self.kind() {
+            RecordKind::ProcessesRunnable
+                | RecordKind::ProcessesBlocked => true,
+            _ => false
+        });
+
+        // Do you know of someone who typically has more than 65535 processes
+        // running or waiting for IO at a given time on a single machine? If so,
+        // I'd like to hear about that. Until then, 16 bits seem to be enough.
+        self.data_columns.next().expect("Expected live process counter")
+                         .parse().expect("Failed to parse process counter")
+    }
 
     /// Construct a new record from associated file columns
     fn new(mut file_columns: SplitColumns<'a, 'b>) -> Self {
