@@ -5,9 +5,10 @@
 //! allows monitoring their time evolution.
 //!
 //! This sampling interface always works in the same way: read the contents of
-//! the file and hand it to a parser which will extract and internally keep a
-//! set of measurements. As a consequence, it is possible to standardize the
-//! sampling abstraction, which is what this module does.
+//! the file and hand it to a parser which will extract and decode a set of
+//! measurements, that will in turn be fed to a container. As a consequence, it
+//! is possible to standardize the sampling abstraction, which is what this
+//! module does.
 
 
 /// Define the sampler struct associated with a certain pseudo-file parser
@@ -16,10 +17,12 @@
 /// and feed it into a certain parser's sample() method every time its sample()
 /// method is called. For example, the invocation...
 ///
-/// `define_sampler!(MemInfoSampler : "/proc/meminfo" => MemInfoData)`
+/// `define_sampler!(MemInfoSampler : "/proc/meminfo" => MemInfoParser
+///                                                   => MemInfoData)`
 ///
 /// ...defines a sampler called "MemInfoSampler" which loads data from the file
-/// /proc/meminfo and feeds it to a parser of type "MemInfoData".
+/// /proc/meminfo and feeds it to a parser of type "MemInfoParser", which will
+/// eventually store the parsed data into a container called "MemInfoData".
 ///
 /// In today's Rust, this job must be done via macros, because Rust does not yet
 /// support generics with value parameters. In future Rust, once this genericity
@@ -30,44 +33,6 @@
 /// that your parser struct properly implements the PseudoFileParser trait.
 ///
 macro_rules! define_sampler {
-    // Old-style monolithic parser+container type
-    // TODO: Remove this and update documentation
-    ($sampler:ident : $file_location:expr => $parser:ty) => {
-        // Hopefully the host won't need to import these...
-        use ::reader::ProcFileReader;
-        use std::io;
-
-        /// Mechanism for sampling measurements from $file_location
-        pub struct $sampler {
-            /// Reader object for $file_location
-            reader: ProcFileReader,
-
-            /// Parser holding sampled data from $file_location
-            samples: $parser,
-        }
-        //
-        impl $sampler {
-            /// Create a new sampler for $file_location
-            pub fn new() -> io::Result<Self> {
-                let mut reader = ProcFileReader::open($file_location)?;
-                let samples = reader.sample(|initial| <$parser>::new(initial))?;
-                Ok(
-                    Self {
-                        reader,
-                        samples,
-                    }
-                )
-            }
-
-            /// Acquire a new sample of data from $file_location
-            pub fn sample(&mut self) -> io::Result<()> {
-                let samples = &mut self.samples;
-                self.reader.sample(|contents: &str| samples.push(contents))
-            }
-        }
-    };
-
-    // New-style separate parser and container types
     ($sampler: ident : $file_location:expr => $parser:ty => $container:ty) => {
         // Hopefully the host won't need to import these...
         use ::reader::ProcFileReader;
