@@ -54,7 +54,7 @@ pub(super) struct SampledData {
 //
 impl SampledData {
     /// Create new paging statistics
-    pub fn new() -> Self {
+    pub fn new(_fields: RecordFields) -> Self {
         Self {
             incoming: Vec::new(),
             outgoing: Vec::new(),

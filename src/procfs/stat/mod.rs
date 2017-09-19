@@ -487,12 +487,16 @@ impl SampledData {
 
                 // Paging statistics
                 RecordKind::PagingTotal => {
-                    data.paging = Some(paging::SampledData::new());
+                    data.paging = Some(
+                        paging::SampledData::new(record.parse_paging())
+                    );
                 },
 
                 // Swapping statistics
                 RecordKind::PagingSwap => {
-                    data.swapping = Some(paging::SampledData::new());
+                    data.swapping = Some(
+                        paging::SampledData::new(record.parse_paging())
+                    );
                 },
 
                 // Hardware interrupt statistics
