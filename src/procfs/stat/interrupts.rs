@@ -175,23 +175,23 @@ mod tests {
     fn parse_interrupt_counts() {
         // Adding one zero should keep us in the base "zeroes" state
         let mut counts = SampledCounter::new();
-        counts.push("0");
+        counts.push(0);
         assert_eq!(counts, SampledCounter::Zeroes(1));
         assert_eq!(counts.len(), 1);
 
         // Adding a nonzero value should get us out of this state
-        counts.push("123");
+        counts.push(123);
         assert_eq!(counts, SampledCounter::Samples(vec![0, 123]));
         assert_eq!(counts.len(), 2);
 
         // After that, sampling should work normally
-        counts.push("456");
+        counts.push(456);
         assert_eq!(counts, SampledCounter::Samples(vec![0, 123, 456]));
         assert_eq!(counts.len(), 3);
 
         // Sampling right from the start should work as well
         let mut counts2 = SampledCounter::new();
-        counts2.push("789");
+        counts2.push(789);
         assert_eq!(counts2, SampledCounter::Samples(vec![789]));
         assert_eq!(counts2.len(), 1);
     }

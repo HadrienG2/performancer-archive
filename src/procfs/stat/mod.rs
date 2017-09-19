@@ -630,10 +630,10 @@ impl SampledData {
         let mut opt_len = None;
         Self::update_len(&mut opt_len, &self.all_cpus);
         debug_assert!(
-            self.each_cpu
+            self.each_thread
                 .iter()
                 .all(|cpu| {
-                    opt_len.expect("each_cpu should come with all_cpus") ==
+                    opt_len.expect("each_thread should come with all_cpus") ==
                         cpu.len()
                 })
         );
@@ -739,7 +739,7 @@ mod tests {
         let mut stats = String::new();
         let empty_stats = SampledData::new(&stats);
         assert!(empty_stats.all_cpus.is_none());
-        assert_eq!(empty_stats.each_cpu.len(), 0);
+        assert_eq!(empty_stats.each_thread.len(), 0);
         assert!(empty_stats.paging.is_none());
         assert!(empty_stats.swapping.is_none());
         assert!(empty_stats.interrupts.is_none());
@@ -763,7 +763,7 @@ mod tests {
         stats.push_str("\ncpu0 0 1 1 3
                           cpu1 1 1 2 1");
         let local_cpu_stats = SampledData::new(&stats);
-        expected.each_cpu = vec![cpu::SampledData::new(4); 2];
+        expected.each_thread = vec![cpu::SampledData::new(4); 2];
         expected.line_target.push(RecordKind::CPUThread(0));
         expected.line_target.push(RecordKind::CPUThread(1));
         assert_eq!(local_cpu_stats, expected);
@@ -872,8 +872,8 @@ mod tests {
         expected.all_cpus.as_mut()
                          .expect("CPU stats incorrectly marked as missing")
                          .push_str("1 2 3 4");
-        expected.each_cpu[0].push_str("0 1 1 3");
-        expected.each_cpu[1].push_str("1 1 2 1");
+        expected.each_thread[0].push_str("0 1 1 3");
+        expected.each_thread[1].push_str("1 1 2 1");
         assert_eq!(local_cpu_stats, expected);
         assert_eq!(expected.len(), 1);
 
