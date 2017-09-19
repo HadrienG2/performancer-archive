@@ -147,7 +147,7 @@ impl<'a, 'b> Record<'a, 'b> {
             // Check for per-thread CPU stats
             RecordKind::CPUThread(thread_id) => {
                 (&self.header[0..3] == "cpu") &&
-                (self.header[4..].parse() == Ok(thread_id))
+                (self.header[3..].parse() == Ok(thread_id))
             },
 
             /// Check for paging statistics
