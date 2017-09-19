@@ -213,10 +213,69 @@ impl StatDataStore for SampledData {
 /// Unit tests
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+    use ::splitter::split_line_and_run;
+    use super::{RecordFields, TICKS_PER_SEC};
+
+    /// Test the parsing of valid CPU stats
+    #[test]
+    fn record_field_parsing() {
+        // Figure out the duration of a kernel tick
+        let tick_duration = Duration::new(
+            0,
+            (1_000_000_000 / *TICKS_PER_SEC) as u32
+        );
+
+        // Check that the oldest supported CPU stats format is parsed properly
+        with_record_fields("165 18 96 1", |mut fields| {
+            assert_eq!(fields.next(), Some(tick_duration*165));
+            assert_eq!(fields.next(), Some(tick_duration*18));
+            assert_eq!(fields.next(), Some(tick_duration*96));
+            assert_eq!(fields.next(), Some(tick_duration));
+            assert_eq!(fields.next(), None);
+        });
+
+        // Check that a slightly extended version parses just as well
+        with_record_fields("9 698 6521 151 56", |mut fields| {
+            assert_eq!(fields.next(), Some(tick_duration*9));
+            assert_eq!(fields.next(), Some(tick_duration*698));
+            assert_eq!(fields.next(), Some(tick_duration*6521));
+            assert_eq!(fields.next(), Some(tick_duration*151));
+            assert_eq!(fields.next(), Some(tick_duration*56));
+            assert_eq!(fields.next(), None);
+        });
+
+        // Check that the newest supported CPU stats format parses as well
+        with_record_fields("18 9616 11 941 5 51 9 615 62 14", |mut fields| {
+            assert_eq!(fields.next(), Some(tick_duration*18));
+            assert_eq!(fields.next(), Some(tick_duration*9616));
+            assert_eq!(fields.next(), Some(tick_duration*11));
+            assert_eq!(fields.next(), Some(tick_duration*941));
+            assert_eq!(fields.next(), Some(tick_duration*5));
+            assert_eq!(fields.next(), Some(tick_duration*51));
+            assert_eq!(fields.next(), Some(tick_duration*9));
+            assert_eq!(fields.next(), Some(tick_duration*615));
+            assert_eq!(fields.next(), Some(tick_duration*62));
+            assert_eq!(fields.next(), Some(tick_duration*14));
+            assert_eq!(fields.next(), None);
+        });
+    }
+
+    /// Build the CPU record fields associated with a certain line of text, and
+    /// run code taking it as a parameter
+    fn with_record_fields<F, R>(line_of_text: &str, functor: F) -> R
+        where F: FnOnce(RecordFields) -> R
+    {
+        split_line_and_run(line_of_text, |columns| {
+            let field_stream = RecordFields::new(columns);
+            functor(field_stream)
+        })
+    }
+
+
     /* TODO: Make the tests great again
 
-    use std::time::Duration;
-    use super::{SampledData, StatDataStore, TICKS_PER_SEC};
+    use super::{SampledData, StatDataStore};
 
     /// Check that CPU statistics initialization works as expected
     #[test]
