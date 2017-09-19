@@ -719,7 +719,7 @@ impl<T, U> StatDataStore for Vec<T>
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
-    use super::{PseudoFileParser, SampledData, StatDataMember, StatDataStore};
+    use super::{RecordKind, SampledData, StatDataStore};
     use super::{cpu, interrupts, paging};
 
     /// Check that scalar statistics parsing works as expected
@@ -755,7 +755,7 @@ mod tests {
         stats.push_str("cpu 1 2 3 4");
         let global_cpu_stats = SampledData::new(&stats);
         expected.all_cpus = Some(cpu::SampledData::new(4));
-        expected.line_target.push(StatDataMember::AllCPUs);
+        expected.line_target.push(RecordKind::CPUTotal);
         assert_eq!(global_cpu_stats, expected);
         assert_eq!(expected.len(), 0);
 
@@ -764,8 +764,8 @@ mod tests {
                           cpu1 1 1 2 1");
         let local_cpu_stats = SampledData::new(&stats);
         expected.each_cpu = vec![cpu::SampledData::new(4); 2];
-        expected.line_target.push(StatDataMember::EachCPU);
-        expected.line_target.push(StatDataMember::EachCPU);
+        expected.line_target.push(RecordKind::CPUThread(0));
+        expected.line_target.push(RecordKind::CPUThread(1));
         assert_eq!(local_cpu_stats, expected);
         assert_eq!(expected.len(), 0);
 
@@ -773,7 +773,7 @@ mod tests {
         stats.push_str("\npage 42 43");
         let paging_stats = SampledData::new(&stats);
         expected.paging = Some(paging::SampledData::new());
-        expected.line_target.push(StatDataMember::Paging);
+        expected.line_target.push(RecordKind::PagingTotal);
         assert_eq!(paging_stats, expected);
         assert_eq!(expected.len(), 0);
 
@@ -781,7 +781,7 @@ mod tests {
         stats.push_str("\nswap 24 34");
         let swapping_stats = SampledData::new(&stats);
         expected.swapping = Some(paging::SampledData::new());
-        expected.line_target.push(StatDataMember::Swapping);
+        expected.line_target.push(RecordKind::PagingSwap);
         assert_eq!(swapping_stats, expected);
         assert_eq!(expected.len(), 0);
 
@@ -789,7 +789,7 @@ mod tests {
         stats.push_str("\nintr 12345 678 910");
         let interrupt_stats = SampledData::new(&stats);
         expected.interrupts = Some(interrupts::SampledData::new(2));
-        expected.line_target.push(StatDataMember::Interrupts);
+        expected.line_target.push(RecordKind::InterruptsSW);
         assert_eq!(interrupt_stats, expected);
         assert_eq!(expected.len(), 0);
 
@@ -797,7 +797,7 @@ mod tests {
         stats.push_str("\nctxt 654321");
         let context_stats = SampledData::new(&stats);
         expected.context_switches = Some(Vec::new());
-        expected.line_target.push(StatDataMember::ContextSwitches);
+        expected.line_target.push(RecordKind::ContextSwitches);
         assert_eq!(context_stats, expected);
         assert_eq!(expected.len(), 0);
 
@@ -805,7 +805,7 @@ mod tests {
         stats.push_str("\nbtime 5738295");
         let boot_time_stats = SampledData::new(&stats);
         expected.boot_time = Some(Utc.timestamp(5738295, 0));
-        expected.line_target.push(StatDataMember::BootTime);
+        expected.line_target.push(RecordKind::BootTime);
         assert_eq!(boot_time_stats, expected);
         assert_eq!(expected.len(), 0);
 
@@ -813,7 +813,7 @@ mod tests {
         stats.push_str("\nprocesses 94536551");
         let process_fork_stats = SampledData::new(&stats);
         expected.process_forks = Some(Vec::new());
-        expected.line_target.push(StatDataMember::ProcessForks);
+        expected.line_target.push(RecordKind::ProcessForks);
         assert_eq!(process_fork_stats, expected);
         assert_eq!(expected.len(), 0);
 
@@ -821,7 +821,7 @@ mod tests {
         stats.push_str("\nprocs_running 1624");
         let runnable_process_stats = SampledData::new(&stats);
         expected.runnable_processes = Some(Vec::new());
-        expected.line_target.push(StatDataMember::RunnableProcesses);
+        expected.line_target.push(RecordKind::ProcessesRunnable);
         assert_eq!(runnable_process_stats, expected);
         assert_eq!(expected.len(), 0);
 
@@ -829,7 +829,7 @@ mod tests {
         stats.push_str("\nprocs_blocked 8948");
         let blocked_process_stats = SampledData::new(&stats);
         expected.blocked_processes = Some(Vec::new());
-        expected.line_target.push(StatDataMember::BlockedProcesses);
+        expected.line_target.push(RecordKind::ProcessesBlocked);
         assert_eq!(blocked_process_stats, expected);
         assert_eq!(expected.len(), 0);
 
@@ -837,7 +837,7 @@ mod tests {
         stats.push_str("\nsoftirq 94651 1561 21211 12 71867");
         let softirq_stats = SampledData::new(&stats);
         expected.softirqs = Some(interrupts::SampledData::new(4));
-        expected.line_target.push(StatDataMember::SoftIRQs);
+        expected.line_target.push(RecordKind::InterruptsHW);
         assert_eq!(softirq_stats, expected);
         assert_eq!(expected.len(), 0);
     }
