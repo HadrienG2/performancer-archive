@@ -9,25 +9,26 @@ use super::StatDataStore;
 
 /// CPU statistics record from /proc/stat
 ///
-/// This will yield the amount of CPU time that the system (or one of its CPU
-/// cores) spent in various states.
+/// This will yield the amount of CPU time that the system (or one of its
+/// hardware CPU threads) spent in various states.
 ///
 /// Some timings were added in a certain Linux release and will only be provided
-/// by sufficiently recent kernels. You will find the associated kernel version
-/// requirements below, and can use the "version" module of this package to
-/// check if they are met by the host kernel.
+/// by sufficiently recent kernels. You will find the ordered list of the
+/// expected timings and associated kernel version requirements below, and can
+/// use the "version" module of this crate in order to check what should be
+/// expected from the host kernel.
 ///
-/// * user time (spent in a user mode process)
-/// * nice time (spent in a user mode process, running with low priority)
-/// * system time (spent in system mode, running kernel code)
-/// * idle time (spent doing nothing, "in the idle task")
-/// * iowait time (mostly deprecated and meaningless today, used to be a measure
-///   of the time spent waiting for I/O to complete) \[Linux 2.5.41+\]
-/// * irq time (spent servicing hardware interrupts) \[Linux 2.6.0-test4+\]
-/// * softirq time (spent servicing software interrupts) \[Linux 2.6.0-test4+\]
-/// * steal time (spent in other OSs, when virtualized) \[Linux 2.6.11+\]
-/// * guest time (spent running a guest virtualized OS) \[Linux 2.6.24+\]
-/// * guest_nice (spent running a guast, with low priority) \[Linux 2.6.33+\]
+/// 1. user time (spent in a user mode process)
+/// 2. nice time (spent in a user mode process, running with low priority)
+/// 3. system time (spent in system mode, running kernel code)
+/// 4. idle time (spent doing nothing, "in the idle task")
+/// 5. iowait time (mostly deprecated and meaningless today, used to be a
+///    measure of the time spent waiting for I/O to complete) \[Linux 2.5.41+\]
+/// 6. irq time (spent servicing hardware interrupts) \[Linux 2.6.0-test4+\]
+/// 7. softirq time (spent servicing software interrupts) \[Linux 2.6.0-test4+\]
+/// 8. steal time (spent in other OSs, when virtualized) \[Linux 2.6.11+\]
+/// 9. guest time (spent running a guest virtualized OS) \[Linux 2.6.24+\]
+/// 10. guest_nice (spent running a guast, with low priority) \[Linux 2.6.33+\]
 ///
 pub(super) struct RecordFields<'a, 'b> where 'a: 'b {
     /// Data columns of the record, interpreted as CPU timings
@@ -150,52 +151,38 @@ impl SampledData {
             guest_nice_time: conditional_vec(),
         }
     }
-}
-//
-impl StatDataStore for SampledData {
+
     /// Parse CPU statistics and add them to the internal data store
-    fn push(&mut self, mut stats: SplitColumns) {
+    pub fn push(&mut self, mut fields: RecordFields) {
         // This scope is needed to please rustc's current borrow checker
         {
-            // This is how we parse the next duration from the input (if any)
-            let ticks_per_sec = *TICKS_PER_SEC;
-            let nanosecs_per_tick = *NANOSECS_PER_TICK;
-            let mut next_stat = || -> Option<Duration> {
-                stats.next().map(|str_duration| -> Duration {
-                    let ticks: u64 =
-                        str_duration.parse()
-                                    .expect("Failed to parse CPU tick counter");
-                    let secs = ticks / ticks_per_sec;
-                    let nanosecs = (ticks % ticks_per_sec) * nanosecs_per_tick;
-                    Duration::new(secs, nanosecs as u32)
-                })
-            };
-
             // Load the "mandatory" CPU statistics
-            self.user_time.push(next_stat().expect("User time missing"));
-            self.nice_time.push(next_stat().expect("Nice time missing"));
-            self.system_time.push(next_stat().expect("System time missing"));
-            self.idle_time.push(next_stat().expect("Idle time missing"));
+            self.user_time.push(fields.next().expect("User time missing"));
+            self.nice_time.push(fields.next().expect("Nice time missing"));
+            self.system_time.push(fields.next().expect("System time missing"));
+            self.idle_time.push(fields.next().expect("Idle time missing"));
 
             // Load the "optional" CPU statistics
-            let mut load_optional_stat = |stat: &mut Option<Vec<Duration>>| {
+            let mut optional_load = |stat: &mut Option<Vec<Duration>>| {
                 if let Some(ref mut vec) = *stat {
-                    vec.push(next_stat().expect("A CPU timer went missing"));
+                    vec.push(fields.next().expect("A CPU timer went missing"));
                 }
             };
-            load_optional_stat(&mut self.io_wait_time);
-            load_optional_stat(&mut self.irq_time);
-            load_optional_stat(&mut self.softirq_time);
-            load_optional_stat(&mut self.stolen_time);
-            load_optional_stat(&mut self.guest_time);
-            load_optional_stat(&mut self.guest_nice_time);
+            optional_load(&mut self.io_wait_time);
+            optional_load(&mut self.irq_time);
+            optional_load(&mut self.softirq_time);
+            optional_load(&mut self.stolen_time);
+            optional_load(&mut self.guest_time);
+            optional_load(&mut self.guest_nice_time);
         }
 
         // At this point, we should have loaded all available stats
-        debug_assert!(stats.next().is_none(),
+        debug_assert!(fields.next().is_none(),
                       "A CPU timer appeared out of nowhere");
     }
-
+}
+//
+impl StatDataStore for SampledData {
     /// Tell how many samples are present in the data store
     #[cfg(test)]
     fn len(&self) -> usize {

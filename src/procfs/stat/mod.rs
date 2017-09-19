@@ -4,15 +4,14 @@ mod cpu;
 mod interrupts;
 mod paging;
 
-use ::sampler::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use chrono::{DateTime, TimeZone, Utc};
 use std::fmt::Debug;
 use std::str::FromStr;
 
 
-// Implement a sampler for /proc/stat using StatData for parsing & storage
-define_sampler!{ Sampler : "/proc/stat" => SampledData }
+// Implement a sampler for /proc/meminfo
+define_sampler!{ Sampler : "/proc/stat" => Parser => SampledData }
 
 
 /// Streaming parser for /proc/stat
@@ -85,16 +84,16 @@ impl<'a, 'b> Record<'a, 'b> {
     /// Tell how the active record should be parsed (if at all)
     fn kind(&self) -> RecordKind {
         match self.header {
-            /// The header of global or per-core CPU stats starts with "cpu"
+            /// The header of global or per-thread CPU stats starts with "cpu"
             cpu_header if &cpu_header[0..3] == "cpu" => {
                 if cpu_header.len() == 3 {
                     // If it's just "cpu", we're dealing with global CPU stats
                     RecordKind::CPUTotal
                 } else {
                     // If it's followed by a numerical identifier, we're
-                    // dealing with per-core CPU stats
-                    if let Ok(cpu_id) = cpu_header[3..].parse() {
-                        RecordKind::CPUCore(cpu_id)
+                    // dealing with per-thread CPU stats
+                    if let Ok(thread_id) = cpu_header[3..].parse() {
+                        RecordKind::CPUThread(thread_id)
                     } else {
                         RecordKind::Unsupported(cpu_header.to_owned())
                     }
@@ -145,10 +144,10 @@ impl<'a, 'b> Record<'a, 'b> {
             // Check for global CPU stats
             RecordKind::CPUTotal => (self.header == "cpu"),
 
-            // Check for per-core CPU stats
-            RecordKind::CPUCore(cpu_id) => {
+            // Check for per-thread CPU stats
+            RecordKind::CPUThread(thread_id) => {
                 (&self.header[0..3] == "cpu") &&
-                (self.header[4..].parse() == Ok(cpu_id))
+                (self.header[4..].parse() == Ok(thread_id))
             },
 
             /// Check for paging statistics
@@ -183,7 +182,7 @@ impl<'a, 'b> Record<'a, 'b> {
     fn parse_cpu(self) -> cpu::RecordFields<'a, 'b> {
         // In debug mode, check that we don't misinterpret things
         debug_assert!(match self.kind() {
-            RecordKind::CPUTotal | RecordKind::CPUCore(_) => true,
+            RecordKind::CPUTotal | RecordKind::CPUThread(_) => true,
             _ => false
         });
 
@@ -192,7 +191,7 @@ impl<'a, 'b> Record<'a, 'b> {
     }
 
     /// Parse the current record as paging or swapping statistics
-    fn parse_paging(self) -> paging::RecordFields<'a, 'b> {
+    fn parse_paging(self) -> paging::RecordFields {
         // In debug mode, check that we don't misinterpret things
         debug_assert!(match self.kind() {
             RecordKind::PagingTotal | RecordKind::PagingSwap => true,
@@ -222,8 +221,16 @@ impl<'a, 'b> Record<'a, 'b> {
 
         // Context switches happen rather frequently (up to 10k/second), so
         // anything less than a 64-bit counter would be unwise for this quantity
-        self.data_columns.next().expect("Expected context switch counter")
-                         .parse().expect("Failed to parse context switches")
+        let result = self.data_columns
+                         .next().expect("Expected context switch counter")
+                         .parse().expect("Failed to parse context switches");
+
+        // In debug mode, check that nothing weird appeared in the input
+        debug_assert_eq!(self.data_columns.next(), None,
+                         "Unexpected additional context switching stat");
+
+        // Return the context switch counter
+        result
     }
 
     /// Parse the current record as a boot time
@@ -232,11 +239,18 @@ impl<'a, 'b> Record<'a, 'b> {
         debug_assert_eq!(self.kind(), RecordKind::BootTime);
 
         // Boot times are provided in seconds since the UNIX UTC epoch
-        Utc.timestamp(
+        let result = Utc.timestamp(
             self.data_columns.next().expect("Expected boot time")
                              .parse().expect("Boot time should be an integer"),
             0
-        )
+        );
+
+        // In debug mode, check that nothing weird appeared in the input
+        debug_assert_eq!(self.data_columns.next(), None,
+                         "Unexpected additional boot time stat");
+
+        // Return the boot time
+        result
     }
 
     /// Parse the current record as a process fork counter
@@ -246,8 +260,16 @@ impl<'a, 'b> Record<'a, 'b> {
 
         // Spawning four billion processes seems somewhat unusual for the uptime
         // of a typical UNIX machine, so I think we can stick with u32 here
-        self.data_columns.next().expect("Expected process fork counter")
-                         .parse().expect("Failed to parse fork counter")
+        let result = self.data_columns
+                         .next().expect("Expected process fork counter")
+                         .parse().expect("Failed to parse fork counter");
+
+        // In debug mode, check that nothing weird appeared in the input
+        debug_assert_eq!(self.data_columns.next(), None,
+                         "Unexpected additional process fork stat");
+
+        // Return the process fork counter
+        result
     }
 
     /// Parse the current record as a counter of live processes
@@ -262,8 +284,16 @@ impl<'a, 'b> Record<'a, 'b> {
         // Do you know of someone who typically has more than 65535 processes
         // running or waiting for IO at a given time on a single machine? If so,
         // I'd like to hear about that. Until then, 16 bits seem to be enough.
-        self.data_columns.next().expect("Expected live process counter")
-                         .parse().expect("Failed to parse process counter")
+        let result = self.data_columns
+                         .next().expect("Expected live process counter")
+                         .parse().expect("Failed to parse process counter");
+
+        // In debug mode, check that nothing weird appeared in the input
+        debug_assert_eq!(self.data_columns.next(), None,
+                         "Unexpected additional process counter stat");
+
+        // Return the process counter
+        result
     }
 
     /// Construct a new record from associated file columns
@@ -281,13 +311,13 @@ pub enum RecordKind {
     /// Total CPU usage
     CPUTotal,
 
-    /// Single (virtual) CPU core usage, with the core's numerical identifier.
+    /// Single hardware CPU thread usage, with the thread's numerical ID.
     ///
     /// As of 2017, where CPUs with a little more than 256 threads have just
     /// started to appear in HPC centers, a 16-bit ID appears both necessary
-    /// and sufficient for storing Linux' virtual CPU core IDs.
+    /// and sufficient for storing Linux' CPU thread IDs.
     ///
-    CPUCore(u16),
+    CPUThread(u16),
 
     /// Total paging activity to and from disk
     PagingTotal,
@@ -325,6 +355,25 @@ pub enum RecordKind {
 }
 
 
+/// INTERNAL: Helpful wrapper for pushing data into optional containers that we
+///           actually know from additional metadata to be around.
+///
+///           This macro used to be a generic method of SampledData, but at this
+///           point in time we have unfortunately out-smarted the Rust type
+///           system. In a nutshell, the problem lies in the fact that
+///           "record_fields" may or may not have lifetime parameters.
+///
+///           Obviously, the container must have a compatible "push" method.
+///
+macro_rules! force_push {
+    ($store:expr, $record_fields:expr) => {
+        $store.as_mut()
+              .expect("Attempted to push into a nonexistent container")
+              .push($record_fields);
+    };
+}
+
+
 /// Data samples from /proc/stat, in structure-of-array layout
 ///
 /// Courtesy of Linux's total lack of promises regarding the variability of
@@ -337,12 +386,12 @@ struct SampledData {
     /// Total CPU usage stats, aggregated across all hardware threads
     all_cpus: Option<cpu::SampledData>,
 
-    /// Per-CPU usage statistics, featuring one entry per hardware thread
+    /// Per-CPU usage statistics, featuring one entry per hardware CPU thread
     ///
     /// An empty Vec here has the same meaning as a None in other entries: the
     /// per-thread breakdown of CPU usage was not provided by the kernel.
     ///
-    each_cpu: Vec<cpu::SampledData>,
+    each_thread: Vec<cpu::SampledData>,
 
     /// Number of pages that the system paged in and out from disk, overall...
     paging: Option<paging::SampledData>,
@@ -385,17 +434,17 @@ struct SampledData {
     /// kernel configuration (and thus the layout of /proc/stat) will not change
     /// over the course of a series of sampling measurements.
     ///
-    line_target: Vec<StatDataMember>,
+    line_target: Vec<RecordKind>,
 }
 //
-impl PseudoFileParser for SampledData {
+impl SampledData {
     /// Create a new statistical data store, using a first sample to know the
     /// structure of /proc/stat on this system
-    fn new(initial_contents: &str) -> Self {
+    fn new(mut stream: RecordStream) -> Self {
         // Our statistical data store will eventually go there
         let mut data = Self {
             all_cpus: None,
-            each_cpu: Vec::new(),
+            each_thread: Vec::new(),
             paging: None,
             swapping: None,
             interrupts: None,
@@ -411,109 +460,96 @@ impl PseudoFileParser for SampledData {
         // The amount of CPU timers will go there once it's known
         let mut num_cpu_timers = 0u8;
 
-        // For each line of the initial contents of /proc/stat...
-        let mut lines = SplitLinesBySpace::new(initial_contents);
-        while let Some(mut columns) = lines.next() {
+        // For each initial record of /proc/stat...
+        while let Some(record) = stream.next() {
             // ...and check the header
-            match columns.next().expect("Unexpected empty line") {
+            let record_kind = record.kind();
+            match record_kind {
                 // Statistics on all CPUs (should come first)
-                "cpu" => {
-                    num_cpu_timers = columns.count() as u8;
+                RecordKind::CPUTotal => {
+                    num_cpu_timers = record.parse_cpu().count() as u8;
                     data.all_cpus = Some(
                         cpu::SampledData::new(num_cpu_timers)
                     );
-                    data.line_target.push(StatDataMember::AllCPUs);
                 }
 
                 // Statistics on a specific CPU thread (should be consistent
                 // with the global stats and come after them)
-                header if &header[0..3] == "cpu" => {
-                    assert_eq!(columns.count() as u8, num_cpu_timers,
+                RecordKind::CPUThread(thread_id) => {
+                    assert_eq!(thread_id, data.each_thread.len() as u16,
+                               "Unexpected CPU thread ordering");
+                    assert_eq!(record.parse_cpu().count() as u8, num_cpu_timers,
                                "Inconsistent amount of CPU timers");
-                    data.each_cpu.push(
+                    data.each_thread.push(
                         cpu::SampledData::new(num_cpu_timers)
                     );
-                    data.line_target.push(StatDataMember::EachCPU);
                 },
 
                 // Paging statistics
-                "page" => {
+                RecordKind::PagingTotal => {
                     data.paging = Some(paging::SampledData::new());
-                    data.line_target.push(StatDataMember::Paging);
                 },
 
                 // Swapping statistics
-                "swap" => {
+                RecordKind::PagingSwap => {
                     data.swapping = Some(paging::SampledData::new());
-                    data.line_target.push(StatDataMember::Swapping);
                 },
 
                 // Hardware interrupt statistics
-                "intr" => {
-                    let num_interrupts = (columns.count() - 1) as u16;
+                RecordKind::InterruptsHW => {
+                    let num_interrupts = (record.parse_interrupts()
+                                                .details
+                                                .count()) as u16;
                     data.interrupts = Some(
                         interrupts::SampledData::new(num_interrupts)
                     );
-                    data.line_target.push(StatDataMember::Interrupts);
                 },
 
                 // Context switch statistics
-                "ctxt" => {
+                RecordKind::ContextSwitches => {
                     data.context_switches = Some(Vec::new());
-                    data.line_target.push(StatDataMember::ContextSwitches);
                 },
 
                 // Boot time
-                "btime" => {
-                    let btime_str = columns.next()
-                                           .expect("Missing boot time data");
-                    debug_assert_eq!(columns.next(), None,
-                                     "Unexpected extra boot time data");
-                    data.boot_time = Some(
-                        Utc.timestamp(
-                            btime_str.parse()
-                                     .expect("Boot time should be an integer"),
-                            0
-                        )
-                    );
-                    data.line_target.push(StatDataMember::BootTime);
+                RecordKind::BootTime => {
+                    data.boot_time = Some(record.parse_boot_time());
                 },
 
                 // Number of process forks since boot
-                "processes" => {
+                RecordKind::ProcessForks => {
                     data.process_forks = Some(Vec::new());
-                    data.line_target.push(StatDataMember::ProcessForks);
                 },
 
                 // Number of processes in the runnable state
-                "procs_running" => {
+                RecordKind::ProcessesRunnable => {
                     data.runnable_processes = Some(Vec::new());
-                    data.line_target.push(StatDataMember::RunnableProcesses);
                 },
 
                 // Number of processes waiting for I/O
-                "procs_blocked" => {
+                RecordKind::ProcessesBlocked => {
                     data.blocked_processes = Some(Vec::new());
-                    data.line_target.push(StatDataMember::BlockedProcesses);
                 },
 
                 // Softirq statistics
-                "softirq" => {
-                    let num_interrupts = (columns.count() - 1) as u16;
+                RecordKind::InterruptsSW => {
+                    let num_interrupts = (record.parse_interrupts()
+                                                .details
+                                                .count()) as u16;
                     data.softirqs = Some(
                         interrupts::SampledData::new(num_interrupts)
                     );
-                    data.line_target.push(StatDataMember::SoftIRQs);
                 },
 
                 // Something we do not support yet? We should!
-                unknown_header => {
+                RecordKind::Unsupported(ref unknown_header) => {
                     debug_assert!(false,
                                   "Unsupported entry '{}' detected!",
                                   unknown_header);
-                    data.line_target.push(StatDataMember::Unsupported);
                 }
             }
+
+            // Remember what kind of record that was
+            data.line_target.push(record_kind);
         }
 
         // Return our data collection setup
@@ -522,82 +558,69 @@ impl PseudoFileParser for SampledData {
 
     /// Parse the contents of /proc/stat and add a data sample to all
     /// corresponding entries in the internal data store
-    fn push(&mut self, file_contents: &str) {
-        // This is the hardware CPU thread which we are currently considering
-        let mut cpu_iter = self.each_cpu.iter_mut();
+    fn push(&mut self, mut stream: RecordStream) {
+        // This will iterate over the hardware CPU thread data
+        let mut thread_iter = self.each_thread.iter_mut();
 
         // This time, we know how lines of /proc/stat map to our members
-        let mut lines = SplitLinesBySpace::new(file_contents);
         for target in self.line_target.iter() {
-            // The beginning of parsing is the same as before: split by spaces
-            // and extract the header of each line.
-            let mut columns = lines.next()
-                                   .expect("A stat record has disappeared");
-            let header = columns.next().expect("Unexpected empty line");
+            // Check that the record structure of the file has not changed. We
+            // do not support events which can change the /proc/stat schema
+            // (such as kernel updates or CPU hotplug) at this point in time,
+            // so all we need to do is to check for schema consistency.
+            let record = stream.next().expect("Unsupported schema change");
+            assert!(record.has_kind(target), "Unsupported schema change");
 
-            // Forward the /proc/stat data to the appropriate parser, detecting
-            // any structural change in the file (caused by, for example, kernel
-            // updates or CPU hotplug) which we do not support at the moment.
-            const STRUCTURE_ERR: &'static str = "Unsupported structure change";
+            // Now we can sample the new contents of that record
             match *target {
-                StatDataMember::AllCPUs => {
-                    assert_eq!(header, "cpu", "{}", STRUCTURE_ERR);
-                    Self::force_push(&mut self.all_cpus, columns);
+                RecordKind::CPUTotal => {
+                    force_push!(self.all_cpus, record.parse_cpu());
                 },
-                StatDataMember::EachCPU => {
-                    assert_eq!(&header[0..3], "cpu", "{}", STRUCTURE_ERR);
-                    cpu_iter.next()
-                            .expect("Per-cpu stats do not match each_cpu.len()")
-                            .push(columns);
+                RecordKind::CPUThread(_) => {
+                    thread_iter.next()
+                               .expect("Found a bug in CPU thread iteration")
+                               .push(record.parse_cpu());
                 },
-                StatDataMember::Paging => {
-                    assert_eq!(header, "page", "{}", STRUCTURE_ERR);
-                    Self::force_push(&mut self.paging, columns);
+                RecordKind::PagingTotal => {
+                    force_push!(self.paging, record.parse_paging());
                 },
-                StatDataMember::Swapping => {
-                    assert_eq!(header, "swap", "{}", STRUCTURE_ERR);
-                    Self::force_push(&mut self.swapping, columns);
+                RecordKind::PagingSwap => {
+                    force_push!(self.swapping, record.parse_paging());
                 },
-                StatDataMember::Interrupts => {
-                    assert_eq!(header, "intr", "{}", STRUCTURE_ERR);
-                    Self::force_push(&mut self.interrupts, columns);
+                RecordKind::InterruptsHW => {
+                    force_push!(self.interrupts, record.parse_interrupts());
                 },
-                StatDataMember::ContextSwitches => {
-                    assert_eq!(header, "ctxt", "{}", STRUCTURE_ERR);
-                    Self::force_push(&mut self.context_switches, columns);
+                RecordKind::ContextSwitches => {
+                    force_push!(self.context_switches,
+                                record.parse_context_switches());
                 },
-                StatDataMember::BootTime => {
-                    assert_eq!(header, "btime", "{}", STRUCTURE_ERR);
+                RecordKind::BootTime => {
                     // Nothing to do, we only measure boot time once
                 },
-                StatDataMember::ProcessForks => {
-                    assert_eq!(header, "processes", "{}", STRUCTURE_ERR);
-                    Self::force_push(&mut self.process_forks, columns);
+                RecordKind::ProcessForks => {
+                    force_push!(self.process_forks,
+                                record.parse_process_forks());
                 },
-                StatDataMember::RunnableProcesses => {
-                    assert_eq!(header, "procs_running", "{}", STRUCTURE_ERR);
-                    Self::force_push(&mut self.runnable_processes, columns);
+                RecordKind::ProcessesRunnable => {
+                    force_push!(self.runnable_processes,
+                                record.parse_processes());
                 },
-                StatDataMember::BlockedProcesses => {
-                    assert_eq!(header, "procs_blocked", "{}", STRUCTURE_ERR);
-                    Self::force_push(&mut self.blocked_processes, columns);
+                RecordKind::ProcessesBlocked => {
+                    force_push!(self.blocked_processes,
+                                record.parse_processes());
                 },
-                StatDataMember::SoftIRQs => {
-                    assert_eq!(header, "softirq", "{}", STRUCTURE_ERR);
-                    Self::force_push(&mut self.softirqs, columns);
+                RecordKind::InterruptsSW => {
+                    force_push!(self.softirqs, record.parse_interrupts());
                 }
-                StatDataMember::Unsupported => {},
+                RecordKind::Unsupported(_) => {},
             }
         }
 
         // At the end of parsing, we should have consumed all statistics from
         // the file, otherwise the /proc/stat schema got updated behind our back
-        debug_assert_eq!(lines.next(), None,
-                         "A stat record appeared out of nowhere");
-
-        // At the end of parsing, all CPU threads should have been considered
-        debug_assert!(cpu_iter.next().is_none(),
-                      "Per-cpu stats do not match each_cpu.len()");
+        debug_assert!(stream.next().is_none(), "Unsupported schema change");
+        debug_assert!(thread_iter.next().is_none(),
+                      "Found a bug in CPU thread iteration");
     }
 
     /// Tell how many samples are present in the data store, and in debug mode
@@ -623,18 +646,6 @@ impl PseudoFileParser for SampledData {
         Self::update_len(&mut opt_len, &self.blocked_processes);
         Self::update_len(&mut opt_len, &self.softirqs);
         opt_len.unwrap_or(0)
-    }
-}
-//
-impl SampledData {
-    /// INTERNAL: Helpful wrapper for pushing into optional containers that we
-    ///           actually know from additional metadata to be around
-    fn force_push<T>(store: &mut Option<T>, columns: SplitColumns)
-        where T: StatDataStore
-    {
-        store.as_mut()
-             .expect("Attempted to push into a nonexistent container")
-             .push(columns);
     }
 
     /// INTERNAL: Update our prior knowledge of the amount of stored samples
@@ -663,34 +674,21 @@ impl SampledData {
         }
     }
 }
-///
-/// This enum should be kept in sync with the definition of StatData
-///
-#[derive(Debug, PartialEq)]
-enum StatDataMember {
-    /// Data storage elements of StatData
-    AllCPUs,
-    EachCPU,
-    Paging,
-    Swapping,
-    Interrupts,
-    ContextSwitches,
-    BootTime,
-    ProcessForks,
-    RunnableProcesses,
-    BlockedProcesses,
-    SoftIRQs,
-
-    /// Special entry for unsupported fields of /proc/stat
-    Unsupported
-}
 
 
 /// Every container of /proc/stat data should implement the following trait,
 /// which exposes its ability to be filled from segmented /proc/stat contents.
 trait StatDataStore {
-    /// Parse and record a sample of data from /proc/stat
-    fn push(&mut self, splitter: SplitColumns);
+    // The force_push! macro will assume that a container has a "push" method,
+    // which behaves as if the StatDataStore trait had the following members,
+    // and these members were valid Rust syntax.
+    //
+    //    /// Record field parser or pre-parsed record fields. May or may not
+    //    /// have lifetime parameters, it does not really matter in this case.
+    //    type RecordFields<'...>;
+    //    
+    //    /// Parse and record a sample of data from /proc/stat
+    //    fn push(&mut self, fields: Self::RecordFields);
 
     /// In testing code, working from a raw string is sometimes more convenient
     #[cfg(test)]
@@ -710,13 +708,6 @@ impl<T, U> StatDataStore for Vec<T>
     where T: FromStr<Err=U>,
           U: Debug
 {
-    fn push(&mut self, mut columns: SplitColumns) {
-        self.push(columns.next().expect("Expected statistical data")
-                         .parse().expect("Failed to parse statistical data"));
-        debug_assert!(columns.next().is_none(),
-                      "No other statistical data should be present");
-    }
-
     #[cfg(test)]
     fn len(&self) -> usize {
         <Vec<T>>::len(self)

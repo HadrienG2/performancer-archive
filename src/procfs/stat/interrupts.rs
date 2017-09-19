@@ -6,20 +6,33 @@ use super::StatDataStore;
 
 
 /// Interrupt statistics record from /proc/stat
-///
-/// For either hardware or software interrupts, this iterator should yield...
-///
-/// * The total amount of interrupts of this kind that were serviced
-/// * A breakdown of the interrupts that were serviced for each "numbered"
-///   interrupt source known to the kernel
-/// * A None terminator
-///
 pub(super) struct RecordFields<'a, 'b> where 'a: 'b {
-    /// Data columns of the record, interpreted as paging statistics
+    /// Total amount of interrupt requests that were serviced
+    pub total: u64,
+
+    /// Breakdown of the interrupt requests per numbered interrupt source.
+    pub details: DetailsIter<'a, 'b>,
+}
+//
+impl<'a, 'b> RecordFields<'a, 'b> {
+    /// Build a new parser for interrupt record fields
+    pub fn new(mut data_columns: SplitColumns<'a, 'b>) -> Self {
+        Self {
+            total: data_columns.next().expect("Expected total IRQ counter")
+                               .parse().expect("Failed to parse IRQ total"),
+            details: DetailsIter { data_columns },
+        }
+    }
+}
+///
+/// Breakdown of IRQ counts per numbered interrupt source.
+/// Beware that not all interrupt sources are numbered by the Linux kernel.
+pub(super) struct DetailsIter<'a, 'b> where 'a: 'b {
+    /// Data columns of the record, interpreted as numbered IRQs
     data_columns: SplitColumns<'a, 'b>,
 }
 //
-impl<'a, 'b> Iterator for RecordFields<'a, 'b> {
+impl<'a, 'b> Iterator for DetailsIter<'a, 'b> {
     /// We're outputting 64-bit counters
     type Item = u64;
 
@@ -32,18 +45,9 @@ impl<'a, 'b> Iterator for RecordFields<'a, 'b> {
             if str_counter == "0" {
                 0
             } else {
-                str_counter.parse().expect("Failed to parse interrupt counter")
+                str_counter.parse().expect("Failed to parse IRQ counter")
             }
         })
-    }
-}
-//
-impl<'a, 'b> RecordFields<'a, 'b> {
-    /// Build a new parser for interrupt record fields
-    pub fn new(data_columns: SplitColumns<'a, 'b>) -> Self {
-        Self {
-            data_columns,
-        }
     }
 }
 
@@ -67,25 +71,27 @@ impl SampledData {
             details: vec![SampledCounter::new(); num_irqs as usize],
         }
     }
-}
-//
-impl StatDataStore for SampledData {
+
     /// Parse interrupt statistics and add them to the internal data store
-    fn push(&mut self, mut stats: SplitColumns) {
+    pub fn push(&mut self, fields: RecordFields) {
         // Load the total interrupt count
-        self.total.push(stats.next().expect("Total IRQ count missing")
-                             .parse().expect("Failed to parse IRQ count"));
+        self.total.push(fields.total);
 
         // Load the detailed interrupt counts from each source
+        let mut details_iter = fields.details;
         for detail in self.details.iter_mut() {
-            detail.push(stats.next().expect("An IRQ counter went missing"));
+            detail.push(details_iter.next()
+                                    .expect("An IRQ counter went missing"));
         }
 
         // At this point, we should have loaded all available stats
-        debug_assert!(stats.next().is_none(),
+        debug_assert!(details_iter.next().is_none(),
                       "An IRQ counter appeared out of nowhere");
     }
 
+}
+//
+impl StatDataStore for SampledData {
     // Tell how many samples are present in the data store
     #[cfg(test)]
     fn len(&self) -> usize {
@@ -117,28 +123,25 @@ impl SampledCounter {
     }
 
     /// Insert a new interrupt count from /proc/stat
-    fn push(&mut self, intr_count: &str) {
+    fn push(&mut self, intr_count: u64) {
         match *self {
             // Have we only seen zeroes so far?
             SampledCounter::Zeroes(zero_count) => {
                 // Are we seeing a zero again?
-                if intr_count == "0" {
+                if intr_count == 0 {
                     // If yes, just increment the zero counter
                     *self = SampledCounter::Zeroes(zero_count+1);
                 } else {
                     // If not, move to regular interrupt count sampling
                     let mut samples = vec![0; zero_count];
-                    samples.push(
-                        intr_count.parse().expect("Failed to parse IRQ count")
-                    );
+                    samples.push(intr_count);
                     *self = SampledCounter::Samples(samples);
                 }
             },
 
             // If the interrupt counter is nonzero, sample it normally
             SampledCounter::Samples(ref mut vec) => {
-                vec.push(intr_count.parse()
-                                   .expect("Failed to parse IRQ count"));
+                vec.push(intr_count);
             }
         }
     }

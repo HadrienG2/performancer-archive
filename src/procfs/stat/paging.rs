@@ -6,35 +6,37 @@ use super::StatDataStore;
 
 
 /// Paging statistics record from /proc/stat
-///
-/// For the paging scenario of interest, this iterator should yield...
-///
-/// * The amount of memory pages that were brought in from disk
-/// * The amount of memory pages that were sent out to disk
-/// * A None terminator
-///
-pub(super) struct RecordFields<'a, 'b> where 'a: 'b {
-    /// Data columns of the record, interpreted as paging statistics
-    data_columns: SplitColumns<'a, 'b>,
-}
-//
-impl<'a, 'b> Iterator for RecordFields<'a, 'b> {
-    /// We're outputting 64-bit counters
-    type Item = u64;
+pub(super) struct RecordFields {
+    /// Number of memory pages that were brought in from disk
+    pub incoming: u64,
 
-    /// This is how we generate them from file columns
-    fn next(&mut self) -> Option<Self::Item> {
-        self.data_columns.next().map(|str_counter| {
-            str_counter.parse().expect("Failed to parse paging counter")
-        })
-    }
+    /// Number of memory pages that were sent out to disk
+    pub outgoing: u64,
 }
 //
-impl<'a, 'b> RecordFields<'a, 'b> {
-    /// Build a new parser for paging record fields
-    pub fn new(data_columns: SplitColumns<'a, 'b>) -> Self {
+impl RecordFields {
+    /// Decode the paging data
+    pub fn new<'a, 'b>(mut data_columns: SplitColumns<'a, 'b>) -> Self {
+        // Scope added to address current borrow checker limitation
+        let (incoming, outgoing) = {
+            /// This is how we decode one field from the input
+            let mut parse_counter = || -> u64 {
+                data_columns.next().expect("Missing paging counter")
+                            .parse().expect("Failed to parse paging counter")
+            };
+
+            /// Parse the counters of incoming and outgoing pages
+            (parse_counter(), parse_counter())
+        };
+
+        // In debug mode, check that nothing weird appeared in the input
+        debug_assert_eq!(data_columns.next(), None,
+                         "Unexpected additional paging counter");
+
+        /// Return the paging counters
         Self {
-            data_columns,
+            incoming,
+            outgoing,
         }
     }
 }
@@ -58,22 +60,15 @@ impl SampledData {
             outgoing: Vec::new(),
         }
     }
+
+    /// Parse paging statistics and add them to the internal data store
+    pub fn push(&mut self, fields: RecordFields) {
+        self.incoming.push(fields.incoming);
+        self.outgoing.push(fields.outgoing);
+    }
 }
 //
 impl StatDataStore for SampledData {
-    /// Parse paging statistics and add them to the internal data store
-    fn push(&mut self, mut stats: SplitColumns) {
-        // Load the incoming and outgoing page count
-        self.incoming.push(stats.next().expect("Missing incoming page count")
-                                .parse().expect("Could not parse page count"));
-        self.outgoing.push(stats.next().expect("Missing outgoing page count")
-                                .parse().expect("Could not parse page count"));
-
-        // At this point, we should have loaded all available stats
-        debug_assert!(stats.next().is_none(),
-                      "Unexpected counter in paging statistics");
-    }
-
     /// Tell how many samples are present in the data store
     #[cfg(test)]
     fn len(&self) -> usize {
