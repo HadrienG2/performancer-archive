@@ -457,31 +457,25 @@ impl SampledData {
             line_target: Vec::new(),
         };
 
-        // The amount of CPU timers will go there once it's known
-        let mut num_cpu_timers = 0u8;
-
         // For each initial record of /proc/stat...
         while let Some(record) = stream.next() {
             // ...and check the header
             let record_kind = record.kind();
             match record_kind {
-                // Statistics on all CPUs (should come first)
+                // Statistics on all CPUs
                 RecordKind::CPUTotal => {
-                    num_cpu_timers = record.parse_cpu().count() as u8;
                     data.all_cpus = Some(
-                        cpu::SampledData::new(num_cpu_timers)
+                        cpu::SampledData::new(record.parse_cpu())
                     );
                 }
 
-                // Statistics on a specific CPU thread (should be consistent
-                // with the global stats and come after them)
+                // Statistics on a specific CPU thread (should be enumerated in
+                // order, from thread 0 to thread Nt-1)
                 RecordKind::CPUThread(thread_id) => {
                     assert_eq!(thread_id, data.each_thread.len() as u16,
                                "Unexpected CPU thread ordering");
-                    assert_eq!(record.parse_cpu().count() as u8, num_cpu_timers,
-                               "Inconsistent amount of CPU timers");
                     data.each_thread.push(
-                        cpu::SampledData::new(num_cpu_timers)
+                        cpu::SampledData::new(record.parse_cpu())
                     );
                 },
 
