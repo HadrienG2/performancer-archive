@@ -65,10 +65,10 @@ pub(super) struct SampledData {
 //
 impl SampledData {
     /// Create new interrupt statistics, given the amount of interrupt sources
-    pub fn new(num_irqs: u16) -> Self {
+    pub fn new(fields: RecordFields) -> Self {
         Self {
             total: Vec::new(),
-            details: vec![SampledCounter::new(); num_irqs as usize],
+            details: vec![SampledCounter::new(); fields.details.count()],
         }
     }
 

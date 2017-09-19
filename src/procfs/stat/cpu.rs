@@ -120,7 +120,7 @@ impl SampledData {
     /// Create new CPU statistics
     pub fn new(num_timers: u8) -> Self {
         // Check if we know about all CPU timers
-        debug_assert!(num_timers >= 4, "Some expected CPU timers are missing");
+        assert!(num_timers >= 4, "Some expected CPU timers are missing");
         debug_assert!(num_timers <= 10, "Unknown CPU timers detected");
 
         // Prepare to conditionally create a certain amount of timing Vecs

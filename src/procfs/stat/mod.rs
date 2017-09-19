@@ -497,11 +497,8 @@ impl SampledData {
 
                 // Hardware interrupt statistics
                 RecordKind::InterruptsHW => {
-                    let num_interrupts = (record.parse_interrupts()
-                                                .details
-                                                .count()) as u16;
                     data.interrupts = Some(
-                        interrupts::SampledData::new(num_interrupts)
+                        interrupts::SampledData::new(record.parse_interrupts())
                     );
                 },
 
@@ -532,11 +529,8 @@ impl SampledData {
 
                 // Softirq statistics
                 RecordKind::InterruptsSW => {
-                    let num_interrupts = (record.parse_interrupts()
-                                                .details
-                                                .count()) as u16;
                     data.softirqs = Some(
-                        interrupts::SampledData::new(num_interrupts)
+                        interrupts::SampledData::new(record.parse_interrupts())
                     );
                 },
 
