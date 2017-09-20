@@ -236,9 +236,9 @@ mod tests {
         });
 
         // Check that a slightly extended version parses just as well
-        with_record_fields("9 698 6521 151 56", |mut fields| {
+        with_record_fields("9 678 6521 151 56", |mut fields| {
             assert_eq!(fields.next(), Some(tick_duration*9));
-            assert_eq!(fields.next(), Some(tick_duration*698));
+            assert_eq!(fields.next(), Some(tick_duration*678));
             assert_eq!(fields.next(), Some(tick_duration*6521));
             assert_eq!(fields.next(), Some(tick_duration*151));
             assert_eq!(fields.next(), Some(tick_duration*56));
@@ -246,9 +246,9 @@ mod tests {
         });
 
         // Check that the newest supported CPU stats format parses as well
-        with_record_fields("18 9616 11 941 5 51 9 615 62 14", |mut fields| {
+        with_record_fields("18 9613 11 941 5 51 9 615 62 14", |mut fields| {
             assert_eq!(fields.next(), Some(tick_duration*18));
-            assert_eq!(fields.next(), Some(tick_duration*9616));
+            assert_eq!(fields.next(), Some(tick_duration*9613));
             assert_eq!(fields.next(), Some(tick_duration*11));
             assert_eq!(fields.next(), Some(tick_duration*941));
             assert_eq!(fields.next(), Some(tick_duration*5));
@@ -267,8 +267,8 @@ mod tests {
         where F: FnOnce(RecordFields) -> R
     {
         split_line_and_run(line_of_text, |columns| {
-            let field_stream = RecordFields::new(columns);
-            functor(field_stream)
+            let fields = RecordFields::new(columns);
+            functor(fields)
         })
     }
 
