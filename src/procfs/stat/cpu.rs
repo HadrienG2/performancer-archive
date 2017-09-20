@@ -34,7 +34,7 @@ pub(super) struct RecordFields<'a, 'b> where 'a: 'b {
     /// Data columns of the record, interpreted as CPU timings
     data_columns: SplitColumns<'a, 'b>,
 
-    /// Number of clock ticks in one nanosecond (cached from TICKS_PER_SEC)
+    /// Number of clock ticks in one second (cached from TICKS_PER_SEC)
     ticks_per_sec: u64,
 
     /// Number of nanoseconds in one clock tick (cached from NANOSECS_PER_TICK)
@@ -215,16 +215,13 @@ impl StatDataStore for SampledData {
 mod tests {
     use std::time::Duration;
     use ::splitter::split_line_and_run;
-    use super::{RecordFields, TICKS_PER_SEC};
+    use super::{RecordFields, NANOSECS_PER_TICK};
 
     /// Test the parsing of valid CPU stats
     #[test]
     fn record_field_parsing() {
         // Figure out the duration of a kernel tick
-        let tick_duration = Duration::new(
-            0,
-            (1_000_000_000 / *TICKS_PER_SEC) as u32
-        );
+        let tick_duration = *TICK_DURATION;
 
         // Check that the oldest supported CPU stats format is parsed properly
         with_record_fields("165 18 96 1", |mut fields| {
@@ -270,6 +267,15 @@ mod tests {
             let fields = RecordFields::new(columns);
             functor(fields)
         })
+    }
+
+    lazy_static! {
+        /// Duration of one CPU tick, only suitable for debugging use at the
+        /// moment since Duration has no multiplication operator for u64 (alas!)
+        static ref TICK_DURATION: Duration = Duration::new(
+            0,
+            *NANOSECS_PER_TICK as u32
+        );
     }
 
 
