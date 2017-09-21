@@ -88,7 +88,6 @@ impl SampledData {
         debug_assert!(details_iter.next().is_none(),
                       "An IRQ counter appeared out of nowhere");
     }
-
 }
 //
 impl StatDataStore for SampledData {
@@ -160,85 +159,101 @@ impl SampledCounter {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    /* TODO: Make the tests great again
+    use ::splitter::split_line_and_run;
+    use super::{DetailsIter, RecordFields, SampledCounter, SampledData,
+                StatDataStore};
 
-    use super::{SampledCounter, SampledData, StatDataStore};
-
-    /// Check that initializing an interrupt count sampler works as expected
+    /// Check that the detailed interrupt count parser works, and that its
+    /// optimization for zero interrupt counts does not mess things up
     #[test]
-    fn init_interrupt_counts() {
-        let counts = SampledCounter::new();
-        assert_eq!(counts, SampledCounter::Zeroes(0));
-        assert_eq!(counts.len(), 0);
+    fn details_iter() {
+        split_line_and_run("0 1 56 0 98 0 11 36856", |data_columns| {
+            let mut details_iter = DetailsIter { data_columns };
+            assert_eq!(details_iter.next(), Some(0));
+            assert_eq!(details_iter.next(), Some(1));
+            assert_eq!(details_iter.next(), Some(56));
+            assert_eq!(details_iter.next(), Some(0));
+            assert_eq!(details_iter.next(), Some(98));
+            assert_eq!(details_iter.next(), Some(0));
+            assert_eq!(details_iter.next(), Some(11));
+            assert_eq!(details_iter.next(), Some(36856));
+            assert_eq!(details_iter.next(), None);
+        })
     }
 
-    /// Check that interrupt count sampling works as expected
+    /// Check that overall, interrupt statistics are parsed well
     #[test]
-    fn parse_interrupt_counts() {
-        // Adding one zero should keep us in the base "zeroes" state
-        let mut counts = SampledCounter::new();
-        counts.push(0);
-        assert_eq!(counts, SampledCounter::Zeroes(1));
-        assert_eq!(counts.len(), 1);
-
-        // Adding a nonzero value should get us out of this state
-        counts.push(123);
-        assert_eq!(counts, SampledCounter::Samples(vec![0, 123]));
-        assert_eq!(counts.len(), 2);
-
-        // After that, sampling should work normally
-        counts.push(456);
-        assert_eq!(counts, SampledCounter::Samples(vec![0, 123, 456]));
-        assert_eq!(counts.len(), 3);
-
-        // Sampling right from the start should work as well
-        let mut counts2 = SampledCounter::new();
-        counts2.push(789);
-        assert_eq!(counts2, SampledCounter::Samples(vec![789]));
-        assert_eq!(counts2.len(), 1);
+    fn record_fields() {
+        with_record_fields("666 42 0", |mut fields| {
+            assert_eq!(fields.total, 666);
+            assert_eq!(fields.details.next(), Some(42));
+            assert_eq!(fields.details.next(), Some(0));
+            assert_eq!(fields.details.next(), None);
+        });
     }
 
-    /// Check that interrupt statistics initialization works as expected
+    /// Check that interrupt count samples work well, zero-optimization included
     #[test]
-    fn init_interrupt_stat() {
-        // Check that interrupt statistics without any details work
-        let no_details_stats = SampledData::new(0);
-        assert_eq!(no_details_stats.total.len(), 0);
-        assert_eq!(no_details_stats.details.len(), 0);
-        assert_eq!(no_details_stats.len(), 0);
+    fn sampled_counter() {
+        // Initial sampler state
+        let mut samples = SampledCounter::new();
+        assert_eq!(samples, SampledCounter::Zeroes(0));
+        assert_eq!(samples.len(), 0);
 
-        // Check that interrupt statistics with two detailed counters work
-        let two_stats = SampledData::new(2);
-        assert_eq!(two_stats.details.len(), 2);
-        assert_eq!(two_stats.details[0].len(), 0);
-        assert_eq!(two_stats.details[1].len(), 0);
-        assert_eq!(two_stats.len(), 0);
+        // Pushing zeroes keeps us in the zero-optimized state
+        samples.push(0);
+        assert_eq!(samples, SampledCounter::Zeroes(1));
+        assert_eq!(samples.len(), 1);
+        samples.push(0);
+        assert_eq!(samples, SampledCounter::Zeroes(2));
+        assert_eq!(samples.len(), 2);
 
-        // Check that interrupt statistics with lots of detailed counters work
-        let many_stats = SampledData::new(256);
-        assert_eq!(many_stats.details.len(), 256);
-        assert_eq!(many_stats.details[0].len(), 0);
-        assert_eq!(many_stats.details[255].len(), 0);
-        assert_eq!(many_stats.len(), 0);
+        // Pushing nonzero values gets us out of it correctly
+        samples.push(69);
+        assert_eq!(samples, SampledCounter::Samples(vec![0, 0, 69]));
+        assert_eq!(samples.len(), 3);
+
+        // We don't incorrectly get back to it if we push zero again
+        samples.push(0);
+        assert_eq!(samples, SampledCounter::Samples(vec![0, 0, 69, 0]));
+        assert_eq!(samples.len(), 4);
+
+        // Subsequent pushes work just as well
+        samples.push(27);
+        assert_eq!(samples, SampledCounter::Samples(vec![0, 0, 69, 0, 27]));
+        assert_eq!(samples.len(), 5);
     }
 
-    /// Check that parsing interrupt statistics works as expected
+    /// Check that full interrupt samples work well
     #[test]
-    fn parse_interrupt_stat() {
-        // Interrupt statistics without any detail
-        let mut no_details_stats = SampledData::new(0);
-        no_details_stats.push_str("12345");
-        assert_eq!(no_details_stats.total, vec![12345]);
-        assert_eq!(no_details_stats.details.len(), 0);
-        assert_eq!(no_details_stats.len(), 1);
+    fn sampled_data() {
+        // Check that initialization works
+        let mut data = with_record_fields("666 0 24", SampledData::new);
+        assert_eq!(data.total, Vec::new());
+        assert_eq!(data.details.len(), 2);
+        assert_eq!(data.len(), 0);
 
-        // Interrupt statistics with two detailed counters
-        let mut two_stats = SampledData::new(2);
-        two_stats.push_str("12345 678 910");
-        assert_eq!(two_stats.total, vec![12345]);
-        assert_eq!(two_stats.details, 
-                   vec![SampledCounter::Samples(vec![678]),
-                        SampledCounter::Samples(vec![910])]);
-        assert_eq!(two_stats.len(), 1);
-    } */
+        // Check that subsequent pushes work as expected
+        with_record_fields("669 0 26", |fields| data.push(fields));
+        assert_eq!(data.total, vec![669]);
+        assert_eq!(data.details, vec![SampledCounter::Zeroes(1),
+                                      SampledCounter::Samples(vec![26])]);
+        assert_eq!(data.len(), 1);
+        with_record_fields("782 66 42", |fields| data.push(fields));
+        assert_eq!(data.total, vec![669, 782]);
+        assert_eq!(data.details, vec![SampledCounter::Samples(vec![0,  66]),
+                                      SampledCounter::Samples(vec![26, 42])]);
+        assert_eq!(data.len(), 2);
+    }
+
+    /// Build the interrupt record fields associated with a line of text, and
+    /// run code taking it as a parameter
+    fn with_record_fields<F, R>(line_of_text: &str, functor: F) -> R
+        where F: FnOnce(RecordFields) -> R
+    {
+        split_line_and_run(line_of_text, |columns| {
+            let fields = RecordFields::new(columns);
+            functor(fields)
+        })
+    }
 }
