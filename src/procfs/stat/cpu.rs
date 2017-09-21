@@ -23,12 +23,12 @@ use super::StatDataStore;
 /// 3. system time (spent in system mode, running kernel code)
 /// 4. idle time (spent doing nothing, "in the idle task")
 /// 5. iowait time (mostly deprecated and meaningless today, used to be a
-///    measure of the time spent waiting for I/O to complete) \[Linux 2.5.41+\]
-/// 6. irq time (spent servicing hardware interrupts) \[Linux 2.6.0-test4+\]
-/// 7. softirq time (spent servicing software interrupts) \[Linux 2.6.0-test4+\]
-/// 8. steal time (spent in other OSs, when virtualized) \[Linux 2.6.11+\]
-/// 9. guest time (spent running a guest virtualized OS) \[Linux 2.6.24+\]
-/// 10. guest_nice (spent running a guast, with low priority) \[Linux 2.6.33+\]
+///    measure of the time spent waiting for I/O to complete) **Linux 2.5.41+**
+/// 6. irq time (spent servicing hardware interrupts) **Linux 2.6.0-test4+**
+/// 7. softirq time (spent servicing software interrupts) **Linux 2.6.0-test4+**
+/// 8. steal time (spent in other OSs, when virtualized) **Linux 2.6.11+**
+/// 9. guest time (spent running a guest virtualized OS) **Linux 2.6.24+**
+/// 10. guest_nice (spent running a guast, with low priority) **Linux 2.6.33+**
 ///
 pub(super) struct RecordFields<'a, 'b> where 'a: 'b {
     /// Data columns of the record, interpreted as CPU timings
@@ -97,12 +97,13 @@ pub(super) struct SampledData {
     idle_time: Vec<Duration>,
 
     /// Time spent waiting for IO to complete (since Linux 2.5.41)
+    /// BEWARE: This measure is mostly meaningless on modern kernels
     io_wait_time: Option<Vec<Duration>>,
 
     /// Time spent servicing hardware interrupts (since Linux 2.6.0-test4)
     irq_time: Option<Vec<Duration>>,
 
-    /// Time spent servicing softirqs (since Linux 2.6.0-test4)
+    /// Time spent servicing software interrupts (since Linux 2.6.0-test4)
     softirq_time: Option<Vec<Duration>>,
 
     /// "Stolen" time spent in other operating systems when running in a
