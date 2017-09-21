@@ -247,7 +247,7 @@ mod tests {
     }
 
     /// Build the interrupt record fields associated with a line of text, and
-    /// run code taking it as a parameter
+    /// run code taking that as a parameter
     fn with_record_fields<F, R>(line_of_text: &str, functor: F) -> R
         where F: FnOnce(RecordFields) -> R
     {

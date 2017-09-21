@@ -82,26 +82,46 @@ impl StatDataStore for SampledData {
 /// Unit tests
 #[cfg(test)]
 mod tests {
-    /* TODO: Make the tests great again
+    use ::splitter::split_line_and_run;
+    use super::{RecordFields, SampledData, StatDataStore};
 
-    use super::{SampledData, StatDataStore};
-
-    /// Check that paging statistics initialization works as expected
+    /// Check that paging statistics parsing works as expected
     #[test]
-    fn init_paging_stat() {
-        let stats = SampledData::new();
-        assert_eq!(stats.incoming.len(), 0);
-        assert_eq!(stats.outgoing.len(), 0);
-        assert_eq!(stats.len(), 0);
+    fn record_fields() {
+        with_record_fields("865 43", |fields| {
+            assert_eq!(fields.incoming, 865);
+            assert_eq!(fields.outgoing, 43);
+        });
     }
 
-    /// Check that parsing paging statistics works as expected
+    /// Check that paging statistics are stored as expected
     #[test]
-    fn parse_paging_stat() {
-        let mut stats = SampledData::new();
-        stats.push_str("123 456");
-        assert_eq!(stats.incoming, vec![123]);
-        assert_eq!(stats.outgoing, vec![456]);
-        assert_eq!(stats.len(), 1);
-    } */
+    fn sampled_data() {
+        // The initial state should be right
+        let mut data = with_record_fields("4 312", SampledData::new);
+        assert_eq!(data.incoming, Vec::new());
+        assert_eq!(data.outgoing, Vec::new());
+        assert_eq!(data.len(),    0);
+
+        // Pushing data in should work correctly
+        with_record_fields("600 598", |fields| data.push(fields));
+        assert_eq!(data.incoming, vec![600]);
+        assert_eq!(data.outgoing, vec![598]);
+        assert_eq!(data.len(),    1);
+        with_record_fields("666 4097", |fields| data.push(fields));
+        assert_eq!(data.incoming, vec![600, 666]);
+        assert_eq!(data.outgoing, vec![598, 4097]);
+        assert_eq!(data.len(),    2);
+    }
+
+    /// Build the paging record fields associated with a certain line of text,
+    /// and run code taking that as a parameter
+    fn with_record_fields<F, R>(line_of_text: &str, functor: F) -> R
+        where F: FnOnce(RecordFields) -> R
+    {
+        split_line_and_run(line_of_text, |columns| {
+            let fields = RecordFields::new(columns);
+            functor(fields)
+        })
+    }
 }

@@ -366,7 +366,7 @@ mod tests {
     }
 
     /// Build the CPU record fields associated with a certain line of text, and
-    /// run code taking it as a parameter
+    /// run code taking that as a parameter
     fn with_record_fields<F, R>(line_of_text: &str, functor: F) -> R
         where F: FnOnce(RecordFields) -> R
     {
