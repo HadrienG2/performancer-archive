@@ -215,7 +215,7 @@ impl StatDataStore for SampledData {
 mod tests {
     use std::time::Duration;
     use ::splitter::split_line_and_run;
-    use super::{RecordFields, NANOSECS_PER_TICK};
+    use super::{RecordFields, SampledData, StatDataStore, NANOSECS_PER_TICK};
 
     /// Test the parsing of valid CPU stats
     #[test]
@@ -258,6 +258,112 @@ mod tests {
         });
     }
 
+    /// Check that CPU stats containers work well for the oldest stat format
+    #[test]
+    fn oldest_stats() {
+        // Figure out the duration of a kernel tick
+        let tick_duration = *TICK_DURATION;
+
+        // Check that building a container for the oldest stats format works
+        let mut data = with_record_fields("94 6316 64 2", SampledData::new);
+        assert_eq!(data.user_time,          Vec::new());
+        assert_eq!(data.nice_time,          Vec::new());
+        assert_eq!(data.system_time,        Vec::new());
+        assert_eq!(data.idle_time,          Vec::new());
+        assert_eq!(data.io_wait_time,       None);
+        assert_eq!(data.irq_time,           None);
+        assert_eq!(data.softirq_time,       None);
+        assert_eq!(data.stolen_time,        None);
+        assert_eq!(data.guest_time,         None);
+        assert_eq!(data.guest_nice_time,    None);
+        assert_eq!(data.len(),              0);
+
+        // Check that pushing data into it works as well
+        with_record_fields("46 421 3 7866", |fields| data.push(fields));
+        assert_eq!(data.user_time,          vec![tick_duration*46]);
+        assert_eq!(data.nice_time,          vec![tick_duration*421]);
+        assert_eq!(data.system_time,        vec![tick_duration*3]);
+        assert_eq!(data.idle_time,          vec![tick_duration*7866]);
+        assert_eq!(data.io_wait_time,       None);
+        assert_eq!(data.irq_time,           None);
+        assert_eq!(data.softirq_time,       None);
+        assert_eq!(data.stolen_time,        None);
+        assert_eq!(data.guest_time,         None);
+        assert_eq!(data.guest_nice_time,    None);
+        assert_eq!(data.len(),              1);
+    }
+
+    /// Check that the first historical "extented" stats format works as well
+    #[test]
+    fn extended_stats() {
+        // Figure out the duration of a kernel tick
+        let tick_duration = *TICK_DURATION;
+
+        // Check that building a container for the extended stats format works
+        let mut data = with_record_fields("66 321 795 12 32", SampledData::new);
+        assert_eq!(data.user_time,          Vec::new());
+        assert_eq!(data.nice_time,          Vec::new());
+        assert_eq!(data.system_time,        Vec::new());
+        assert_eq!(data.idle_time,          Vec::new());
+        assert_eq!(data.io_wait_time,       Some(Vec::new()));
+        assert_eq!(data.irq_time,           None);
+        assert_eq!(data.softirq_time,       None);
+        assert_eq!(data.stolen_time,        None);
+        assert_eq!(data.guest_time,         None);
+        assert_eq!(data.guest_nice_time,    None);
+        assert_eq!(data.len(),              0);
+
+        // Check that pushing data into it works as well
+        with_record_fields("3122 21 9 46 32", |fields| data.push(fields));
+        assert_eq!(data.user_time,          vec![tick_duration*3122]);
+        assert_eq!(data.nice_time,          vec![tick_duration*21]);
+        assert_eq!(data.system_time,        vec![tick_duration*9]);
+        assert_eq!(data.idle_time,          vec![tick_duration*46]);
+        assert_eq!(data.io_wait_time,       Some(vec![tick_duration*32]));
+        assert_eq!(data.irq_time,           None);
+        assert_eq!(data.softirq_time,       None);
+        assert_eq!(data.stolen_time,        None);
+        assert_eq!(data.guest_time,         None);
+        assert_eq!(data.guest_nice_time,    None);
+        assert_eq!(data.len(),              1);
+    }
+
+    /// Check that the latest supported stats format works as well
+    #[test]
+    fn latest_stats() {
+        // Figure out the duration of a kernel tick
+        let tick_duration = *TICK_DURATION;
+
+        // Check that building a container for the extended stats format works
+        let mut data = with_record_fields("31 854 361 32 6 8 21 9 3 2",
+                                          SampledData::new);
+        assert_eq!(data.user_time,          Vec::new());
+        assert_eq!(data.nice_time,          Vec::new());
+        assert_eq!(data.system_time,        Vec::new());
+        assert_eq!(data.idle_time,          Vec::new());
+        assert_eq!(data.io_wait_time,       Some(Vec::new()));
+        assert_eq!(data.irq_time,           Some(Vec::new()));
+        assert_eq!(data.softirq_time,       Some(Vec::new()));
+        assert_eq!(data.stolen_time,        Some(Vec::new()));
+        assert_eq!(data.guest_time,         Some(Vec::new()));
+        assert_eq!(data.guest_nice_time,    Some(Vec::new()));
+        assert_eq!(data.len(),              0);
+
+        // Check that pushing data into it works as well
+        with_record_fields("21 61 8 5 9 3 1 7 0 4", |fields| data.push(fields));
+        assert_eq!(data.user_time,          vec![tick_duration*21]);
+        assert_eq!(data.nice_time,          vec![tick_duration*61]);
+        assert_eq!(data.system_time,        vec![tick_duration*8]);
+        assert_eq!(data.idle_time,          vec![tick_duration*5]);
+        assert_eq!(data.io_wait_time,       Some(vec![tick_duration*9]));
+        assert_eq!(data.irq_time,           Some(vec![tick_duration*3]));
+        assert_eq!(data.softirq_time,       Some(vec![tick_duration*1]));
+        assert_eq!(data.stolen_time,        Some(vec![tick_duration*7]));
+        assert_eq!(data.guest_time,         Some(vec![tick_duration*0]));
+        assert_eq!(data.guest_nice_time,    Some(vec![tick_duration*4]));
+        assert_eq!(data.len(),              1);
+    }
+
     /// Build the CPU record fields associated with a certain line of text, and
     /// run code taking it as a parameter
     fn with_record_fields<F, R>(line_of_text: &str, functor: F) -> R
@@ -277,72 +383,4 @@ mod tests {
             *NANOSECS_PER_TICK as u32
         );
     }
-
-
-    /* TODO: Make the tests great again
-
-    use super::{SampledData, StatDataStore};
-
-    /// Check that CPU statistics initialization works as expected
-    #[test]
-    fn init_cpu_stat() {
-        // Oldest known CPU stats format from Linux 4.11's man proc
-        let oldest_stats = SampledData::new(4);
-        assert_eq!(oldest_stats.user_time.len(), 0);
-        assert_eq!(oldest_stats.nice_time.len(), 0);
-        assert_eq!(oldest_stats.system_time.len(), 0);
-        assert_eq!(oldest_stats.idle_time.len(), 0);
-        assert!(oldest_stats.io_wait_time.is_none());
-        assert!(oldest_stats.guest_nice_time.is_none());
-        assert_eq!(oldest_stats.len(), 0);
-
-        // First known CPU stats extension from Linux 4.11's man proc
-        let first_ext_stats = SampledData::new(5);
-        assert_eq!(first_ext_stats.io_wait_time, Some(Vec::new()));
-        assert!(first_ext_stats.irq_time.is_none());
-        assert!(first_ext_stats.guest_nice_time.is_none());
-        assert_eq!(first_ext_stats.len(), 0);
-
-        // Newest known CPU stats format from Linux 4.11's man proc
-        let latest_stats = SampledData::new(10);
-        assert_eq!(latest_stats.io_wait_time, Some(Vec::new()));
-        assert_eq!(latest_stats.guest_nice_time, Some(Vec::new()));
-        assert_eq!(latest_stats.len(), 0);
-    }
-
-    /// Check that parsing CPU statistics works as expected
-    #[test]
-    fn parse_cpu_stat() {
-        // Oldest known CPU stats format from Linux 4.11's man proc
-        let mut oldest_stats = SampledData::new(4);
-
-        // Figure out the duration of a kernel tick
-        let tick_duration = Duration::new(
-            0,
-            (1_000_000_000 / *TICKS_PER_SEC) as u32
-        );
-
-        // Check that "old" CPU stats are parsed properly
-        oldest_stats.push_str("165 18 96 1");
-        assert_eq!(oldest_stats.user_time,   vec![tick_duration*165]);
-        assert_eq!(oldest_stats.nice_time,   vec![tick_duration*18]);
-        assert_eq!(oldest_stats.system_time, vec![tick_duration*96]);
-        assert_eq!(oldest_stats.idle_time,   vec![tick_duration]);
-        assert!(oldest_stats.io_wait_time.is_none());
-        assert_eq!(oldest_stats.len(), 1);
-
-        // Check that "extended" stats are parsed as well
-        let mut first_ext_stats = SampledData::new(5);
-        first_ext_stats.push_str("9 698 6521 151 56");
-        assert_eq!(first_ext_stats.io_wait_time, Some(vec![tick_duration*56]));
-        assert!(first_ext_stats.irq_time.is_none());
-        assert_eq!(first_ext_stats.len(), 1);
-
-        // Check that "complete" stats are parsed as well
-        let mut latest_stats = SampledData::new(10);
-        latest_stats.push_str("18 9616 11 941 5 51 9 615 62 14");
-        assert_eq!(latest_stats.io_wait_time,    Some(vec![tick_duration*5]));
-        assert_eq!(latest_stats.guest_nice_time, Some(vec![tick_duration*14]));
-        assert_eq!(latest_stats.len(), 1);
-    } */
 }
