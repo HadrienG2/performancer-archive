@@ -63,7 +63,7 @@ impl<'a> RecordStream<'a> {
 ///
 /// Parseable record from /proc/stat
 ///
-/// This represents Ima line of /proc/stat, which may contain various kinds of
+/// This represents a line of /proc/stat, which may contain various kinds of
 /// data. Use the kind() method of this type to identify what kind of supported
 /// data is stored in this record, if any.
 ///
@@ -84,8 +84,9 @@ impl<'a, 'b> Record<'a, 'b> {
     /// Tell how the active record should be parsed (if at all)
     fn kind(&self) -> RecordKind {
         match self.header {
-            /// The header of global or per-thread CPU stats starts with "cpu"
-            cpu_header if &cpu_header[0..3] == "cpu" => {
+            /// The header of global stats starts with "cpu"
+            cpu_header if (cpu_header.len() >= 3) &&
+                          (&cpu_header[0..3] == "cpu") => {
                 if cpu_header.len() == 3 {
                     // If it's just "cpu", we're dealing with global CPU stats
                     RecordKind::CPUTotal
@@ -117,7 +118,8 @@ impl<'a, 'b> Record<'a, 'b> {
             "processes" => RecordKind::ProcessForks,
 
             /// Current process activity has a header starting with "procs_"
-            procs_header if &procs_header[0..6] == "procs_" => {
+            procs_header if (procs_header.len() > 6) &&
+                            (&procs_header[0..6] == "procs_") => {
                 match &procs_header[6..] {
                     "running" => RecordKind::ProcessesRunnable,
                     "blocked" => RecordKind::ProcessesBlocked,
@@ -146,6 +148,7 @@ impl<'a, 'b> Record<'a, 'b> {
 
             // Check for per-thread CPU stats
             RecordKind::CPUThread(thread_id) => {
+                (self.header.len() > 3) &&
                 (&self.header[0..3] == "cpu") &&
                 (self.header[3..].parse() == Ok(thread_id))
             },
@@ -712,6 +715,51 @@ impl<T, U> StatDataStore for Vec<T>
 /// Unit tests
 #[cfg(test)]
 mod tests {
+    use ::splitter::split_line_and_run;
+    use super::{Record, RecordKind};
+
+    /// Check that CPU stats are parsed properly
+    #[test]
+    fn cpu_record() {
+        // The parser should detect exactly "cpu" as a tag. No more, no less.
+        with_record("cp 132 61 651 63", |record| {
+            check_kind(&record, RecordKind::Unsupported("cp".to_owned()));
+        });
+        with_record("cpuu 66 651 3210 320", |record| {
+            check_kind(&record, RecordKind::Unsupported("cpuu".to_owned()));
+        });
+
+        // If only that tag is present, we are dealing with global CPU stats
+        with_record("cpu 98 6 966 48", |record| {
+            check_kind(&record, RecordKind::CPUTotal);
+            let cpu_fields = record.parse_cpu();
+            assert_eq!(cpu_fields.count(), 4);
+        });
+
+        // If a numerical ID is also present, these are per-thread stats
+        with_record("cpu42 98 6 966 48 62", |record| {
+            check_kind(&record, RecordKind::CPUThread(42));
+            let cpu_fields = record.parse_cpu();
+            assert_eq!(cpu_fields.count(), 5);
+        });
+    }
+
+    /// Build the record structure associated with a certain line of text
+    fn with_record<F, R>(line_of_text: &str, functor: F) -> R
+        where F: FnOnce(Record) -> R
+    {
+        split_line_and_run(line_of_text, |columns| {
+            let record = Record::new(columns);
+            functor(record)
+        })
+    }
+
+    /// Exhaustively check that a record has a certain kind
+    fn check_kind(record: &Record, expected_kind: RecordKind) {
+        assert_eq!(record.kind(), expected_kind);
+        assert!(record.has_kind(&expected_kind));
+    }
+
     /* TODO: Make the tests great again
 
     use chrono::{TimeZone, Utc};
