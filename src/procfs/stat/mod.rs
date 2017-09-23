@@ -716,6 +716,7 @@ impl<T, U> StatDataStore for Vec<T>
 #[cfg(test)]
 mod tests {
     use ::splitter::split_line_and_run;
+    use super::paging;
     use super::{Record, RecordKind};
 
     /// Check that CPU stats are parsed properly
@@ -741,6 +742,38 @@ mod tests {
             check_kind(&record, RecordKind::CPUThread(42));
             let cpu_fields = record.parse_cpu();
             assert_eq!(cpu_fields.count(), 5);
+        });
+    }
+
+    /// Check that paging stats are parsed properly
+    #[test]
+    fn paging_record() {
+        // The parser should detect "page" and "swap" as tags. No more, no less.
+        with_record("pag 61 616", |record| {
+            check_kind(&record, RecordKind::Unsupported("pag".to_owned()));
+        });
+        with_record("swa 651 646", |record| {
+            check_kind(&record, RecordKind::Unsupported("swa".to_owned()));
+        });
+        with_record("pages 51 94612", |record| {
+            check_kind(&record, RecordKind::Unsupported("pages".to_owned()));
+        });
+        with_record("swapz 62318 162", |record| {
+            check_kind(&record, RecordKind::Unsupported("swapz".to_owned()));
+        });
+
+        // Global paging statistics should be parsed well
+        with_record("page 9846 1367", |record| {
+            check_kind(&record, RecordKind::PagingTotal);
+            assert_eq!(record.parse_paging(),
+                       paging::RecordFields { incoming: 9846, outgoing: 1367 });
+        });
+
+        // Swapping statistics should be parsed well
+        with_record("swap 3645 4793", |record| {
+            check_kind(&record, RecordKind::PagingSwap);
+            assert_eq!(record.parse_paging(),
+                       paging::RecordFields { incoming: 3645, outgoing: 4793 });
         });
     }
 

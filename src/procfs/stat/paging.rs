@@ -6,6 +6,7 @@ use super::StatDataStore;
 
 
 /// Paging statistics record from /proc/stat
+#[derive(Debug, PartialEq)]
 pub(super) struct RecordFields {
     /// Number of memory pages that were brought in from disk
     pub incoming: u64,
