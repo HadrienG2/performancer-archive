@@ -777,6 +777,15 @@ mod tests {
         });
     }
 
+    // TODO: Check that interrupt stats are parsed properly
+    // TODO: Check that context switching stats are parsed properly
+    // TODO: Check that boot time is parsed properly
+    // TODO: Check that process forks are parsed properly
+    // TODO: Check that process activity is parsed properly
+    // TODO: Check that record streams work well
+    // TODO: Check that parsers work well
+    // TODO: Check that sampled data works well
+
     /// Build the record structure associated with a certain line of text
     fn with_record<F, R>(line_of_text: &str, functor: F) -> R
         where F: FnOnce(Record) -> R
