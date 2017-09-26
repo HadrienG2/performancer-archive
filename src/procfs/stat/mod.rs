@@ -794,8 +794,31 @@ mod tests {
         });
     }
 
-    // TODO: Check that process forks are parsed properly
-    // TODO: Check that process activity is parsed properly
+    /// Check that process forks are parsed properly
+    #[test]
+    fn process_forks() {
+        check_tag_parsing("processes", RecordKind::ProcessForks);
+        with_record("processes 9564", |record| {
+            assert_eq!(record.parse_process_forks(), 9564);
+        });
+    }
+
+    /// Check that process activity is parsed properly
+    #[test]
+    fn process_activity() {
+        // Check that we parse the amount of running processes well
+        check_tag_parsing("procs_running", RecordKind::ProcessesRunnable);
+        with_record("procs_running 666", |record| {
+            assert_eq!(record.parse_processes(), 666);
+        });
+
+        // Check that we parse the amount of blocked processes well
+        check_tag_parsing("procs_blocked", RecordKind::ProcessesBlocked);
+        with_record("procs_blocked 1563", |record| {
+            assert_eq!(record.parse_processes(), 1563);
+        });
+    }
+
     // TODO: Check that record streams work well
     // TODO: Check that parsers work well
     // TODO: Check that sampled data works well
