@@ -722,22 +722,14 @@ mod tests {
     /// Check that CPU stats are parsed properly
     #[test]
     fn cpu_record() {
-        // The parser should detect only "cpu" as a tag
-        with_record("cp 132 61 651 63", |record| {
-            check_kind(&record, RecordKind::Unsupported("cp".to_owned()));
-        });
-        with_record("cpuu 66 651 3210 320", |record| {
-            check_kind(&record, RecordKind::Unsupported("cpuu".to_owned()));
-        });
-
-        // If that tag is alone, we are dealing with global CPU stats
+        // Check that we parse global CPU stats well
+        check_tag_parsing("cpu", RecordKind::CPUTotal);
         with_record("cpu 98 6 966 48", |record| {
-            check_kind(&record, RecordKind::CPUTotal);
             let cpu_fields = record.parse_cpu();
             assert_eq!(cpu_fields.count(), 4);
         });
 
-        // If a numerical ID is also present, these are per-thread stats
+        // Check that we parse per-thread CPU stats well
         with_record("cpu42 98 6 966 48 62", |record| {
             check_kind(&record, RecordKind::CPUThread(42));
             let cpu_fields = record.parse_cpu();
@@ -748,30 +740,16 @@ mod tests {
     /// Check that paging stats are parsed properly
     #[test]
     fn paging_record() {
-        // The parser should detect only "page" and "swap" as tags
-        with_record("pag 61 616", |record| {
-            check_kind(&record, RecordKind::Unsupported("pag".to_owned()));
-        });
-        with_record("swa 651 646", |record| {
-            check_kind(&record, RecordKind::Unsupported("swa".to_owned()));
-        });
-        with_record("pages 51 94612", |record| {
-            check_kind(&record, RecordKind::Unsupported("pages".to_owned()));
-        });
-        with_record("swapz 62318 162", |record| {
-            check_kind(&record, RecordKind::Unsupported("swapz".to_owned()));
-        });
-
         // Global paging statistics should be parsed well
+        check_tag_parsing("page", RecordKind::PagingTotal);
         with_record("page 9846 1367", |record| {
-            check_kind(&record, RecordKind::PagingTotal);
             assert_eq!(record.parse_paging(),
                        paging::RecordFields { incoming: 9846, outgoing: 1367 });
         });
 
         // Swapping statistics should be parsed well
+        check_tag_parsing("swap", RecordKind::PagingSwap);
         with_record("swap 3645 4793", |record| {
-            check_kind(&record, RecordKind::PagingSwap);
             assert_eq!(record.parse_paging(),
                        paging::RecordFields { incoming: 3645, outgoing: 4793 });
         });
@@ -780,31 +758,17 @@ mod tests {
     /// Check that interrupt stats are parsed properly
     #[test]
     fn interrupt_record() {
-        // The parser should detect only "intr" and "softirq" as tags
-        with_record("int 123 456", |record| {
-            check_kind(&record, RecordKind::Unsupported("int".to_owned()));
-        });
-        with_record("intrs 789 321", |record| {
-            check_kind(&record, RecordKind::Unsupported("intrs".to_owned()));
-        });
-        with_record("softir 666 999", |record| {
-            check_kind(&record, RecordKind::Unsupported("softir".to_owned()));
-        });
-        with_record("softirqq 111 333", |record| {
-            check_kind(&record, RecordKind::Unsupported("softirqq".to_owned()));
-        });
-
         // Hardware interrupt statistics should be parsed well
+        check_tag_parsing("intr", RecordKind::InterruptsHW);
         with_record("intr 127 0 66", |record| {
-            check_kind(&record, RecordKind::InterruptsHW);
             let fields = record.parse_interrupts();
             assert_eq!(fields.total, 127);
             assert_eq!(fields.details.count(), 2);
         });
 
         // Software interrupt statistics should be parsed well
+        check_tag_parsing("softirq", RecordKind::InterruptsSW);
         with_record("softirq 666 72 69 0", |record| {
-            check_kind(&record, RecordKind::InterruptsSW);
             let fields = record.parse_interrupts();
             assert_eq!(fields.total, 666);
             assert_eq!(fields.details.count(), 3);
@@ -833,6 +797,37 @@ mod tests {
     fn check_kind(record: &Record, expected_kind: RecordKind) {
         assert_eq!(record.kind(), expected_kind);
         assert!(record.has_kind(&expected_kind));
+    }
+
+    /// Make sure that record analysis will recognize the proper tag, nothing
+    /// more and nothing less. For example, not "cp", not "cpuz", but "cpu".
+    fn check_tag_parsing(tag: &str, expected_kind: RecordKind) {
+        // Dummy data to make the test look more realistic, shouldn't be parsed
+        const TEST_DATA: &str = " 984 654";
+
+        // Start with something that should look like a valid record
+        let mut test_record_str = tag.to_owned();
+        test_record_str.push_str(TEST_DATA);
+        with_record(&test_record_str, |record| {
+            check_kind(&record, expected_kind);
+        });
+
+        // Check an invalid record where the tag is one character too short
+        let mut test_tag = (&tag[..tag.len()-1]).to_owned();
+        test_record_str = test_tag.clone();
+        test_record_str.push_str(TEST_DATA);
+        with_record(&test_record_str, |record| {
+            check_kind(&record, RecordKind::Unsupported(test_tag));
+        });
+
+        // Check an invalid record where the tag is one character too long
+        test_tag = tag.to_owned();
+        test_tag.push('z');
+        test_record_str = test_tag.clone();
+        test_record_str.push_str(TEST_DATA);
+        with_record(&test_record_str, |record| {
+            check_kind(&record, RecordKind::Unsupported(test_tag));
+        });
     }
 
     /* TODO: Make the tests great again
