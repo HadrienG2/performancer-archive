@@ -715,6 +715,7 @@ impl<T, U> StatDataStore for Vec<T>
 /// Unit tests
 #[cfg(test)]
 mod tests {
+    use chrono::{TimeZone, Utc};
     use ::splitter::split_line_and_run;
     use super::paging;
     use super::{Record, RecordKind};
@@ -775,8 +776,24 @@ mod tests {
         });
     }
 
-    // TODO: Check that context switching stats are parsed properly
-    // TODO: Check that boot time is parsed properly
+    /// Check that context switching stats are parsed properly
+    #[test]
+    fn context_switches() {
+        check_tag_parsing("ctxt", RecordKind::ContextSwitches);
+        with_record("ctxt 46115", |record| {
+            assert_eq!(record.parse_context_switches(), 46115);
+        });
+    }
+
+    /// Check that boot time stats are parsed properly
+    #[test]
+    fn boot_time() {
+        check_tag_parsing("btime", RecordKind::BootTime);
+        with_record("btime 713705", |record| {
+            assert_eq!(record.parse_boot_time(), Utc.timestamp(713705, 0));
+        });
+    }
+
     // TODO: Check that process forks are parsed properly
     // TODO: Check that process activity is parsed properly
     // TODO: Check that record streams work well
