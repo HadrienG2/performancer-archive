@@ -680,19 +680,11 @@ trait StatDataStore {
     //
     //    /// Record field parser or pre-parsed record fields. May or may not
     //    /// have lifetime parameters, it does not really matter in this case.
+    //    /// This is the notion that I can't express using Rust traits.
     //    type RecordFields<'...>;
     //    
     //    /// Parse and record a sample of data from /proc/stat
     //    fn push(&mut self, fields: Self::RecordFields);
-
-    /* TODO: Make the tests great again
-
-    /// In testing code, working from a raw string is sometimes more convenient
-    #[cfg(test)]
-    fn push_str(&mut self, input: &str) {
-        use splitter::split_line_and_run;
-        split_line_and_run(input, |columns| self.push(columns))
-    } */
 
     /// Number of data samples that were recorded so far
     #[cfg(test)]
@@ -717,8 +709,8 @@ impl<T, U> StatDataStore for Vec<T>
 mod tests {
     use chrono::{TimeZone, Utc};
     use ::splitter::split_line_and_run;
-    use super::paging;
-    use super::{Parser, Record, RecordKind, RecordStream};
+    use super::{cpu, interrupts, paging};
+    use super::{Parser, Record, RecordKind, RecordStream, SampledData};
 
     /// Check that CPU stats are parsed properly
     #[test]
@@ -884,6 +876,129 @@ mod tests {
         check_record_stream(record_stream, &file_contents);
     }
 
+    /// Check that statistical data containers work as expected
+    #[test]
+    fn sampled_data() {
+        // Build a new data container associated with certain file contents
+        let new_sampled_data = |file_contents: &str| -> SampledData {
+            SampledData::new(RecordStream::new(file_contents))
+        };
+
+        // Starting with an empty file (should never happen, but good base case)
+        let mut stats = String::new();
+        let empty_stats = new_sampled_data(&stats);
+        assert!(empty_stats.all_cpus.is_none());
+        assert_eq!(empty_stats.each_thread.len(), 0);
+        assert!(empty_stats.paging.is_none());
+        assert!(empty_stats.swapping.is_none());
+        assert!(empty_stats.interrupts.is_none());
+        assert!(empty_stats.context_switches.is_none());
+        assert!(empty_stats.boot_time.is_none());
+        assert!(empty_stats.process_forks.is_none());
+        assert!(empty_stats.runnable_processes.is_none());
+        assert!(empty_stats.blocked_processes.is_none());
+        assert!(empty_stats.softirqs.is_none());
+        let mut expected = empty_stats;
+
+        // ...adding global CPU stats
+        const GLOBAL_CPU_STR: &'static str = "cpu 1 2 3 4";
+        stats.push_str(GLOBAL_CPU_STR);
+        let global_cpu_stats = new_sampled_data(&stats);
+        expected.all_cpus = split_line_and_run(GLOBAL_CPU_STR, |mut columns| {
+            columns.next();
+            Some(cpu::SampledData::new(cpu::RecordFields::new(columns)))
+        });
+        expected.line_target.push(RecordKind::CPUTotal);
+        assert_eq!(global_cpu_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...adding dual-core CPU stats
+        stats.push_str("\ncpu0 0 1 1 3
+                          cpu1 1 1 2 1");
+        let local_cpu_stats = new_sampled_data(&stats);
+        expected.each_thread = vec![cpu::SampledData::new(4); 2];
+        expected.line_target.push(RecordKind::CPUThread(0));
+        expected.line_target.push(RecordKind::CPUThread(1));
+        assert_eq!(local_cpu_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...adding paging stats
+        stats.push_str("\npage 42 43");
+        let paging_stats = new_sampled_data(&stats);
+        expected.paging = Some(paging::SampledData::new());
+        expected.line_target.push(RecordKind::PagingTotal);
+        assert_eq!(paging_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...adding swapping stats
+        stats.push_str("\nswap 24 34");
+        let swapping_stats = new_sampled_data(&stats);
+        expected.swapping = Some(paging::SampledData::new());
+        expected.line_target.push(RecordKind::PagingSwap);
+        assert_eq!(swapping_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...adding interrupt stats
+        stats.push_str("\nintr 12345 678 910");
+        let interrupt_stats = new_sampled_data(&stats);
+        expected.interrupts = Some(interrupts::SampledData::new(2));
+        expected.line_target.push(RecordKind::InterruptsSW);
+        assert_eq!(interrupt_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...adding context switches
+        stats.push_str("\nctxt 654321");
+        let context_stats = new_sampled_data(&stats);
+        expected.context_switches = Some(Vec::new());
+        expected.line_target.push(RecordKind::ContextSwitches);
+        assert_eq!(context_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...adding boot time
+        stats.push_str("\nbtime 5738295");
+        let boot_time_stats = new_sampled_data(&stats);
+        expected.boot_time = Some(Utc.timestamp(5738295, 0));
+        expected.line_target.push(RecordKind::BootTime);
+        assert_eq!(boot_time_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...adding process fork counter
+        stats.push_str("\nprocesses 94536551");
+        let process_fork_stats = new_sampled_data(&stats);
+        expected.process_forks = Some(Vec::new());
+        expected.line_target.push(RecordKind::ProcessForks);
+        assert_eq!(process_fork_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...adding runnable process counter
+        stats.push_str("\nprocs_running 1624");
+        let runnable_process_stats = new_sampled_data(&stats);
+        expected.runnable_processes = Some(Vec::new());
+        expected.line_target.push(RecordKind::ProcessesRunnable);
+        assert_eq!(runnable_process_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...adding blocked process counter
+        stats.push_str("\nprocs_blocked 8948");
+        let blocked_process_stats = new_sampled_data(&stats);
+        expected.blocked_processes = Some(Vec::new());
+        expected.line_target.push(RecordKind::ProcessesBlocked);
+        assert_eq!(blocked_process_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // ...adding softirq stats
+        stats.push_str("\nsoftirq 94651 1561 21211 12 71867");
+        let softirq_stats = new_sampled_data(&stats);
+        expected.softirqs = Some(interrupts::SampledData::new(4));
+        expected.line_target.push(RecordKind::InterruptsHW);
+        assert_eq!(softirq_stats, expected);
+        assert_eq!(expected.len(), 0);
+
+        // TODO: Finish the tests above, then complement them by adding tests
+        //       for pushing data into the container after creating it
+        unimplemented!()
+    }
+
     // TODO: Check that sampled data works well
 
     /// Build the record structure associated with a certain line of text
@@ -954,20 +1069,6 @@ mod tests {
     }
 
     /* TODO: Make the tests great again
-
-    use chrono::{TimeZone, Utc};
-    use super::{RecordKind, SampledData, StatDataStore};
-    use super::{cpu, interrupts, paging};
-
-    /// Check that scalar statistics parsing works as expected
-    #[test]
-    fn parse_scalar_stat() {
-        let mut scalar_stats = Vec::<u64>::new();
-        assert_eq!(StatDataStore::len(&scalar_stats), 0);
-        StatDataStore::push_str(&mut scalar_stats, "123");
-        assert_eq!(scalar_stats, vec![123]);
-        assert_eq!(StatDataStore::len(&scalar_stats), 1);
-    }
 
     /// Check that statistical data initialization works as expected
     #[test]
