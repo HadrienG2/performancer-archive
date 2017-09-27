@@ -718,7 +718,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use ::splitter::split_line_and_run;
     use super::paging;
-    use super::{Record, RecordKind};
+    use super::{Parser, Record, RecordKind, RecordStream};
 
     /// Check that CPU stats are parsed properly
     #[test]
@@ -819,8 +819,71 @@ mod tests {
         });
     }
 
-    // TODO: Check that record streams work well
-    // TODO: Check that parsers work well
+    /// Check that record streams work well
+    #[test]
+    fn record_stream() {
+        // Build a pseudo-file from a set of records
+        let pseudo_file = ["cpu  9 8 7 6",
+                           "cpu0 7 5 3 1",
+                           "cpu1 2 3 4 5",
+                           "page 666 999",
+                           "swap 333 888",
+                           "intr 128 0 3 4 5",
+                           "ctxt 6461165",
+                           "btime 61616659",
+                           "processes 161316",
+                           "procs_running 24",
+                           "procs_blocked 13",
+                           "totally_unsupported 222",
+                           "softirq 614651 13 16 61 632"].join("\n");
+
+        // This is the associated record stream
+        let record_stream = RecordStream::new(&pseudo_file);
+
+        // Check that our test record stream looks as expected
+        check_record_stream(record_stream, &pseudo_file);
+    }
+
+    // Check that parsers work well
+    #[test]
+    fn parser() {
+        // Build a pseudo-file from a set of records, use that to init a parser
+        let initial_file = ["cpu  9 8 7 6",
+                            "cpu0 7 5 3 1",
+                            "cpu1 2 3 4 5",
+                            "page 666 999",
+                            "silly_silly 2924",
+                            "swap 333 888",
+                            "intr 128 0 3 4 5",
+                            "ctxt 6461165",
+                            "btime 61616659",
+                            "processes 161316",
+                            "procs_running 24",
+                            "procs_blocked 13",
+                            "softirq 614651 13 16 61 632"].join("\n");
+        let mut parser = Parser::new(&initial_file);
+
+        // Now, build another file which is a variant of the first one, and
+        // check that the parser can ingest it just fine
+        let file_contents = ["cpu  24 48 72 96",
+                             "cpu0 17 22 38 91",
+                             "cpu1 7 26 34 5",
+                             "page 888 1010",
+                             "silly_silly 3035",
+                             "swap 666 987",
+                             "intr 129 0 3 4 5",
+                             "ctxt 8461188",
+                             "btime 61616659",
+                             "processes 191436",
+                             "procs_running 14",
+                             "procs_blocked 6",
+                             "softirq 614851 313 216 61 1632"].join("\n");
+        let record_stream = parser.parse(&file_contents);
+
+        // Check that our test record stream looks as expected
+        check_record_stream(record_stream, &file_contents);
+    }
+
     // TODO: Check that sampled data works well
 
     /// Build the record structure associated with a certain line of text
@@ -868,6 +931,26 @@ mod tests {
         with_record(&test_record_str, |record| {
             check_kind(&record, RecordKind::Unsupported(test_tag));
         });
+    }
+
+    /// Test that the output of a record stream is right for a given input file
+    fn check_record_stream(mut stream: RecordStream, file_contents: &str) {
+        for record_str in file_contents.lines() {
+            with_record(record_str, |expected_record| {
+                // Check that the record is there in the actual stream
+                let mut actual_record = stream.next().unwrap();
+
+                // Check that the header matches
+                assert_eq!(expected_record.header, actual_record.header);
+
+                // Check that the columns match
+                for expected_column in expected_record.data_columns {
+                    assert_eq!(actual_record.data_columns.next(),
+                               Some(expected_column));
+                }
+                assert_eq!(actual_record.data_columns.next(), None);
+            });
+        }
     }
 
     /* TODO: Make the tests great again
