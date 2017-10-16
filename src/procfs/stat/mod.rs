@@ -878,11 +878,33 @@ mod tests {
 
     /// Check that statistical data containers work as expected
     #[test]
-    fn sampled_data() {
+    fn init_sampled_data() {
         // Build a new data container associated with certain file contents
         let new_sampled_data = |file_contents: &str| -> SampledData {
             SampledData::new(RecordStream::new(file_contents))
         };
+
+        // Build a container for CPU data using initial file contents
+        let new_cpu_data = |textual_record: &str| -> cpu::SampledData {
+            with_record(textual_record, |record| {
+                cpu::SampledData::new(record.parse_cpu())
+            })
+        };
+
+        // Build a containter for paging data using initial file contents
+        let new_paging_data = |textual_record: &str| -> paging::SampledData {
+            with_record(textual_record, |record| {
+                paging::SampledData::new(record.parse_paging())
+            })
+        };
+
+        // Build a containter for interrupt data using initial file contents
+        let new_interrupts_data =
+            |textual_record: &str| -> interrupts::SampledData {
+                with_record(textual_record, |record| {
+                    interrupts::SampledData::new(record.parse_interrupts())
+                })
+            };
 
         // Starting with an empty file (should never happen, but good base case)
         let mut stats = String::new();
@@ -901,53 +923,50 @@ mod tests {
         let mut expected = empty_stats;
 
         // ...adding global CPU stats
-        const GLOBAL_CPU_STR: &'static str = "cpu 1 2 3 4";
-        stats.push_str(GLOBAL_CPU_STR);
+        stats.push_str("cpu 1 2 3 4\n");
         let global_cpu_stats = new_sampled_data(&stats);
-        expected.all_cpus = split_line_and_run(GLOBAL_CPU_STR, |mut columns| {
-            columns.next();
-            Some(cpu::SampledData::new(cpu::RecordFields::new(columns)))
-        });
+        expected.all_cpus = Some(new_cpu_data("cpu 1 2 3 4"));
         expected.line_target.push(RecordKind::CPUTotal);
         assert_eq!(global_cpu_stats, expected);
         assert_eq!(expected.len(), 0);
 
         // ...adding dual-core CPU stats
-        stats.push_str("\ncpu0 0 1 1 3
-                          cpu1 1 1 2 1");
+        stats.push_str("cpu0 0 1 1 3
+                        cpu1 1 1 2 1\n");
         let local_cpu_stats = new_sampled_data(&stats);
-        expected.each_thread = vec![cpu::SampledData::new(4); 2];
+        expected.each_thread = vec![new_cpu_data("cpu0 0 1 1 3"),
+                                    new_cpu_data("cpu1 1 1 2 1")];
         expected.line_target.push(RecordKind::CPUThread(0));
         expected.line_target.push(RecordKind::CPUThread(1));
         assert_eq!(local_cpu_stats, expected);
         assert_eq!(expected.len(), 0);
 
         // ...adding paging stats
-        stats.push_str("\npage 42 43");
+        stats.push_str("page 42 43\n");
         let paging_stats = new_sampled_data(&stats);
-        expected.paging = Some(paging::SampledData::new());
+        expected.paging = Some(new_paging_data("page 42 43"));
         expected.line_target.push(RecordKind::PagingTotal);
         assert_eq!(paging_stats, expected);
         assert_eq!(expected.len(), 0);
 
         // ...adding swapping stats
-        stats.push_str("\nswap 24 34");
+        stats.push_str("swap 24 34\n");
         let swapping_stats = new_sampled_data(&stats);
-        expected.swapping = Some(paging::SampledData::new());
+        expected.swapping = Some(new_paging_data("swap 24 34"));
         expected.line_target.push(RecordKind::PagingSwap);
         assert_eq!(swapping_stats, expected);
         assert_eq!(expected.len(), 0);
 
         // ...adding interrupt stats
-        stats.push_str("\nintr 12345 678 910");
+        stats.push_str("intr 12345 678 910\n");
         let interrupt_stats = new_sampled_data(&stats);
-        expected.interrupts = Some(interrupts::SampledData::new(2));
-        expected.line_target.push(RecordKind::InterruptsSW);
+        expected.interrupts = Some(new_interrupts_data("intr 12345 678 910"));
+        expected.line_target.push(RecordKind::InterruptsHW);
         assert_eq!(interrupt_stats, expected);
         assert_eq!(expected.len(), 0);
 
         // ...adding context switches
-        stats.push_str("\nctxt 654321");
+        stats.push_str("ctxt 654321\n");
         let context_stats = new_sampled_data(&stats);
         expected.context_switches = Some(Vec::new());
         expected.line_target.push(RecordKind::ContextSwitches);
@@ -955,7 +974,7 @@ mod tests {
         assert_eq!(expected.len(), 0);
 
         // ...adding boot time
-        stats.push_str("\nbtime 5738295");
+        stats.push_str("btime 5738295\n");
         let boot_time_stats = new_sampled_data(&stats);
         expected.boot_time = Some(Utc.timestamp(5738295, 0));
         expected.line_target.push(RecordKind::BootTime);
@@ -963,7 +982,7 @@ mod tests {
         assert_eq!(expected.len(), 0);
 
         // ...adding process fork counter
-        stats.push_str("\nprocesses 94536551");
+        stats.push_str("processes 94536551\n");
         let process_fork_stats = new_sampled_data(&stats);
         expected.process_forks = Some(Vec::new());
         expected.line_target.push(RecordKind::ProcessForks);
@@ -971,7 +990,7 @@ mod tests {
         assert_eq!(expected.len(), 0);
 
         // ...adding runnable process counter
-        stats.push_str("\nprocs_running 1624");
+        stats.push_str("procs_running 1624\n");
         let runnable_process_stats = new_sampled_data(&stats);
         expected.runnable_processes = Some(Vec::new());
         expected.line_target.push(RecordKind::ProcessesRunnable);
@@ -979,7 +998,7 @@ mod tests {
         assert_eq!(expected.len(), 0);
 
         // ...adding blocked process counter
-        stats.push_str("\nprocs_blocked 8948");
+        stats.push_str("procs_blocked 8948\n");
         let blocked_process_stats = new_sampled_data(&stats);
         expected.blocked_processes = Some(Vec::new());
         expected.line_target.push(RecordKind::ProcessesBlocked);
@@ -987,19 +1006,20 @@ mod tests {
         assert_eq!(expected.len(), 0);
 
         // ...adding softirq stats
-        stats.push_str("\nsoftirq 94651 1561 21211 12 71867");
+        const SOFTIRQ_STR: &str = "softirq 94651 1561 21211 12 71867\n";
+        stats.push_str(SOFTIRQ_STR);
         let softirq_stats = new_sampled_data(&stats);
-        expected.softirqs = Some(interrupts::SampledData::new(4));
-        expected.line_target.push(RecordKind::InterruptsHW);
+        expected.softirqs = Some(new_interrupts_data(SOFTIRQ_STR));
+        expected.line_target.push(RecordKind::InterruptsSW);
         assert_eq!(softirq_stats, expected);
         assert_eq!(expected.len(), 0);
-
-        // TODO: Finish the tests above, then complement them by adding tests
-        //       for pushing data into the container after creating it
-        unimplemented!()
     }
 
-    // TODO: Check that sampled data works well
+    // TODO: Check that pushing new sampled data in works well
+    #[test]
+    fn push_sampled_data() {
+        unimplemented!()
+    }
 
     /// Build the record structure associated with a certain line of text
     fn with_record<F, R>(line_of_text: &str, functor: F) -> R
