@@ -53,7 +53,7 @@ impl<'a, 'b> Iterator for DetailsIter<'a, 'b> {
 
 
 /// Interrupt statistics from /proc/stat, in structure-of-array layout
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct SampledData {
     /// Total number of interrupts that were serviced. May be higher than the
     /// sum of the breakdown below if there are unnumbered interrupt sources.

@@ -44,7 +44,7 @@ impl RecordFields {
 
 
 /// Storage paging ativity statistics
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct SampledData {
     /// Number of RAM pages that were paged in from disk
     incoming: Vec<u64>,
