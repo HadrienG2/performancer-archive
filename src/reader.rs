@@ -38,7 +38,7 @@ pub(crate) struct ProcFileReader {
 }
 //
 impl ProcFileReader {
-    /// Attempt to open a proc pseudo-file
+    /// Attempt to open a pseudo-file
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let file_handle = File::open(path)?;
         Ok(
@@ -87,13 +87,6 @@ mod tests {
     use std::thread;
     use std::time::Duration;
     use super::ProcFileReader;
-
-    /// Check that opening /proc/uptime works as expected
-    #[test]
-    fn open_file() {
-        let _ = ProcFileReader::open("/proc/uptime")
-                               .expect("Should be able to open /proc/uptime");
-    }
 
     /// Check that two uptime measurements separated by some sleep differ
     #[test]
