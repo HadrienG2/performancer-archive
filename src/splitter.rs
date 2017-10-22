@@ -13,7 +13,7 @@
 //!
 //! - It iterates through each line twice, once to determine its boundaries and
 //!   another time to separate its columns. This work can be carried out in a
-//!   single pass through the text, at the cost of more code complexity.
+//!   single pass through the text, at the cost of a bit more code complexity.
 //! - It treats "characters" in a Unicode-aware fashion, accounting for things
 //!   like multiple whitespace characters, whereas we know that the Linux kernel
 //!   will only send us ASCII text and only separate it by newlines and spaces.
@@ -51,7 +51,7 @@ pub(crate) struct SplitLinesBySpace<'a> {
     /// Reference to the string which we are trying to split
     target: &'a str,
 
-    /// Iterator over the characters and their byte indices
+    /// Iterator over the characters, with on-demand access to byte indices
     char_iter: FastCharIndices<'a>,
 
     /// Small state machine tracking our input location (beginning or middle
@@ -122,70 +122,66 @@ impl<'a> SplitLinesBySpace<'a> {
     // INTERNAL: Iterate over the space-separated columns of the current line.
     //           This is essentially the implementation of SplitColumns::next().
     fn next_col(&mut self) -> Option<&'a str> {
-        // The caller should have properly called next_line() beforehand
+        // Assuming proper usage of the underlying line iterator...
         assert_eq!(self.status, LineSpaceSplitterStatus::InsideLine);
 
-        // Find the first non-space character before the end of line (if any):
-        // that will be the start of the next word.
-        let first_idx = loop {
+        // Consume input chars until we reach something that's not a space
+        let first_non_space = loop {
             match self.char_iter.next() {
-                // Discard all the spaces along the way.
                 Some(' ') => continue,
-
-                // Output a None when a newline is reached, to signal the client
-                // of space-separated data that it's time to yield control back
-                // to the line iterator (which we configure along the way).
-                Some('\n') => {
-                    self.status = if self.char_iter.is_empty() {
-                                      LineSpaceSplitterStatus::AtInputEnd
-                                  } else {
-                                      LineSpaceSplitterStatus::AtLineStart
-                                  };
-                    return None;
-                },
-
-                // Record the index of the first non-space character
-                Some(_) => {
-                    break self.char_iter.prev_index();
-                },
-
-                // Terminate when the end of the text is reached
-                None => {
-                    self.status = LineSpaceSplitterStatus::AtInputEnd;
-                    return None;
-                },
+                other => break other,
             }
         };
 
-        // We are now inside of a word, and looking for its end. There is one
-        // special scenario to take care of: if the word completes at the end
-        // of the current line, we will need to output two things in a row,
-        // first the word, then a None to signal the line ending. We handle that
-        // using the backtracking ability of FastCharIndices.
-        loop {
-            match self.char_iter.next() {
-                // We reached the end of a word: output said word.
-                Some(' ') => {
-                    let last_idx = self.char_iter.prev_index();
-                    return Some(&self.target[first_idx..last_idx]);
-                },
+        // Determine if we reached a new column of data, or the end of the line
+        let first_idx = match first_non_space {
+            // We reached the end of the line. Prepare the line iterator for the
+            // next line, and notify the column iterator client that we're done
+            // with this line by returning a None.
+            Some('\n') => {
+                self.status = if self.char_iter.is_empty() {
+                                  LineSpaceSplitterStatus::AtInputEnd
+                              } else {
+                                  LineSpaceSplitterStatus::AtLineStart
+                              };
+                return None;
+            },
 
-                // Newlines also terminate words, but we must put them back in
-                // because we also want to subsequently signal them with a None.
+            // We reached the beginning of a data column. Yield its index and
+            // let the remainder of this function extract and return the data.
+            Some(_) => self.char_iter.prev_index(),
+
+            // We reached the end of the input text. Terminate all iteration.
+            None => {
+                self.status = LineSpaceSplitterStatus::AtInputEnd;
+                return None;
+            },
+        };
+
+        // If control reaches this point, we're inside of a data column. Iterate
+        // through input chars until we reach a column terminator (whitespace
+        // character or end of the input text), to locate the end of the column.
+        let last_idx = loop {
+            match self.char_iter.next() {
+                // We can discard spaces and end-of-input terminators: we don't
+                // care about spaces, and the character iterator is fused.
+                Some(' ') | None => break self.char_iter.prev_index(),
+
+                // We must backtrack on end-of-line terminators, as they can
+                // only be handled by the next column iterator invocation.
                 Some('\n') => {
                     let last_idx = self.char_iter.prev_index();
                     self.char_iter.back();
-                    return Some(&self.target[first_idx..last_idx]);
-                }
+                    break last_idx;
+                },
 
-                // We are still in the middle of the word: move on
+                // We are still fetching data characters from the column.
                 Some(_) => continue,
-
-                // We reached the end of the input: output the last word. We do
-                // not need to backtrack since the character iterator is fused.
-                None => return Some(&self.target[first_idx..]),
             }
-        }
+        };
+
+        // The data column has been successfully extracted, we can return it.
+        Some(&self.target[first_idx..last_idx])
     }
 }
 ///
