@@ -23,7 +23,7 @@ pub(crate) trait PseudoFileParser {
 }
 
 
-/// The simplest parsing mechanism is eager parsing, where the parser eagerly
+/// The simplest parsing mechanism is eager parsing, in which the parser eagerly
 /// goes through the entire file, parses everything, put all contents into a
 /// struct, and returns that struct. For most files, it has a relatively high
 /// overhead, but it can be convenient and fast enough for small files so we

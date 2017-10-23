@@ -1,7 +1,6 @@
 //! This module contains a sampling parser for /proc/uptime
 
 use ::parser::PseudoFileParser;
-use ::procfs;
 use std::str::SplitWhitespace;
 use std::time::Duration;
 
@@ -16,6 +15,7 @@ pub struct Parser {}
 impl PseudoFileParser for Parser {
     /// Build a parser, using initial file contents for schema analysis
     fn new(initial_contents: &str) -> Self {
+        // TODO: Check that it parses as well
         let col_count = initial_contents.split_whitespace().count();
         assert!(col_count >= 2, "Uptime and idle time should be present");
         debug_assert_eq!(col_count, 2, "Unsupported entry in /proc/uptime");
@@ -27,6 +27,7 @@ impl PseudoFileParser for Parser {
 impl Parser {
     /// Begin to parse a pseudo-file sample, streaming its data out
     fn parse<'a>(&mut self, file_contents: &'a str) -> FieldStream<'a> {
+        // TODO: Add and use FieldStream::new
         FieldStream {
             file_columns: file_contents.split_whitespace(),
         }
@@ -53,7 +54,48 @@ impl<'a> Iterator for FieldStream<'a> {
 
     /// Parse the next duration from /proc/uptime
     fn next(&mut self) -> Option<Self::Item> {
-        self.file_columns.next().map(procfs::parse_duration_secs)
+        self.file_columns.next().map(Self::parse_duration_secs)
+    }
+}
+//
+impl<'a> FieldStream<'a> {
+    /// Specialized parser for Durations expressed in fractional seconds, using
+    /// the usual text format XXXX[.[YY]]. This is about standardized data, so
+    /// the input is assumed to be correct, and errors will result in panics.
+    fn parse_duration_secs(input: &str) -> Duration {
+        // Separate the integral part from the fractional part (if any)
+        let mut integer_iter = input.split('.');
+
+        // Parse the number of whole seconds
+        let seconds : u64
+            = integer_iter.next().expect("Input should not be empty")
+                          .parse().expect("Input should be a second counter");
+
+        // Parse the number of extra nanoseconds, if any
+        let nanoseconds = match integer_iter.next() {
+            // No decimals or a trailing decimal point means no nanoseconds.
+            Some("") | None => 0,
+
+            // If there is something after the ., assume it is decimals. Sub
+            // nanosecond decimals are unsupported and will be truncated.
+            Some(mut decimals) => {
+                debug_assert!(decimals.chars().all(|c| c.is_digit(10)),
+                              "Non-digit character detected inside decimals");
+                if decimals.len() > 9 { decimals = &decimals[0..9]; }
+                let nanosecs_factor = 10u32.pow(9 - (decimals.len() as u32));
+                let decimals_int =
+                    decimals.parse::<u32>()
+                            .expect("Failed to parse the fractional seconds");
+                decimals_int * nanosecs_factor
+            }
+        };
+
+        // At this point, we should be at the end of the string
+        debug_assert_eq!(integer_iter.next(), None,
+                         "Unexpected input at end of the duration string");
+
+        // Return the Duration that we just parsed
+        Duration::new(seconds, nanoseconds)
     }
 }
 
@@ -71,6 +113,7 @@ impl SampledData {
     /// Create a new uptime data store
     fn new(stream: FieldStream) -> Self {
         let field_count = stream.count();
+        // TODO: That's redundant with parser initialization, remove it
         assert!(field_count >= 2, "Missing expected entry in /proc/uptime");
         debug_assert_eq!(field_count, 2, "Unsupported entry in /proc/uptime");
         Self {
@@ -110,12 +153,30 @@ impl SampledData {
 mod tests {
     use std::thread;
     use std::time::Duration;
-    use super::{SampledData, Parser, Sampler};
+    use super::{FieldStream, Parser, PseudoFileParser, SampledData, Sampler};
 
-    /// Check that creating un uptime parser works
+    /// Check that our Duration parser works as expected
     #[test]
-    fn init_parser() {
-        let _ = Parser::new("56.78 12.34");
+    fn parse_duration() {
+        // Plain seconds
+        assert_eq!(FieldStream::parse_duration_secs("42"),
+                   Duration::new(42, 0));
+
+        // Trailing decimal point
+        assert_eq!(FieldStream::parse_duration_secs("3."),
+                   Duration::new(3, 0));
+
+        // Some amounts of fractional seconds, down to nanosecond precision
+        assert_eq!(FieldStream::parse_duration_secs("4.2"),
+                   Duration::new(4, 200_000_000));
+        assert_eq!(FieldStream::parse_duration_secs("5.34"),
+                   Duration::new(5, 340_000_000));
+        assert_eq!(FieldStream::parse_duration_secs("6.567891234"),
+                   Duration::new(6, 567_891_234));
+
+        // Sub-nanosecond precision is truncated
+        assert_eq!(FieldStream::parse_duration_secs("7.8901234567"),
+                   Duration::new(7, 890_123_456));
     }
 
     /// Check that parsing uptime data works
