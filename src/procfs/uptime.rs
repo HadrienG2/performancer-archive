@@ -1,5 +1,6 @@
 //! This module contains a sampling parser for /proc/uptime
 
+use ::parser::PseudoFileParser;
 use ::procfs;
 use std::str::SplitWhitespace;
 use std::time::Duration;
@@ -9,20 +10,10 @@ use std::time::Duration;
 define_sampler!{ Sampler : "/proc/uptime" => Parser => SampledData }
 
 
-/// Streaming parser for /proc/uptime
-///
-/// TODO: Replace following paragraph with a real description once ready
-///
-/// This is an experiment towards a parser redesign that would decouple the
-/// code used for parsing pseudo-file contents from the code used for storing
-/// it. The goal is to determine if this would be practical and efficient.
-///
-/// The idea behind having two separate Parser and Stream components is that it
-/// allows the parser to cache long-lived metadata about the file being parsed.
-///
+/// Incremental parser for /proc/uptime
 pub struct Parser {}
 //
-impl Parser {
+impl PseudoFileParser for Parser {
     /// Build a parser, using initial file contents for schema analysis
     fn new(initial_contents: &str) -> Self {
         let col_count = initial_contents.split_whitespace().count();
@@ -30,7 +21,10 @@ impl Parser {
         debug_assert_eq!(col_count, 2, "Unsupported entry in /proc/uptime");
         Self {}
     }
-
+}
+//
+// TODO: Implement IncrementalParser once that trait is usable in stable Rust
+impl Parser {
     /// Begin to parse a pseudo-file sample, streaming its data out
     fn parse<'a>(&mut self, file_contents: &'a str) -> FieldStream<'a> {
         FieldStream {
@@ -40,10 +34,7 @@ impl Parser {
 }
 ///
 ///
-/// Stream of parsed data from /proc/uptime
-///
-/// TODO: Compare and contrast the "streaming reader" approach from vitalyd,
-///       where values are lazily rather than eagerly produced.
+/// Stream of parsed data from /proc/uptime.
 ///
 /// This iterator should successively yield...
 ///
