@@ -27,10 +27,7 @@ impl PseudoFileParser for Parser {
 impl Parser {
     /// Begin to parse a pseudo-file sample, streaming its data out
     fn parse<'a>(&mut self, file_contents: &'a str) -> FieldStream<'a> {
-        // TODO: Add and use FieldStream::new
-        FieldStream {
-            file_columns: file_contents.split_whitespace(),
-        }
+        FieldStream::new(file_contents)
     }
 }
 ///
@@ -62,6 +59,10 @@ impl<'a> FieldStream<'a> {
     /// Specialized parser for Durations expressed in fractional seconds, using
     /// the usual text format XXXX[.[YY]]. This is about standardized data, so
     /// the input is assumed to be correct, and errors will result in panics.
+    ///
+    /// If this code turns out to be more generally useful, move it to a higher-
+    /// level module of the crate.
+    ///
     fn parse_duration_secs(input: &str) -> Duration {
         // Separate the integral part from the fractional part (if any)
         let mut integer_iter = input.split('.');
@@ -96,6 +97,13 @@ impl<'a> FieldStream<'a> {
 
         // Return the Duration that we just parsed
         Duration::new(seconds, nanoseconds)
+    }
+
+    /// Set up a FieldStream for a certain sample of /proc/uptime
+    fn new(file_contents: &'a str) -> Self {
+        Self {
+            file_columns: file_contents.split_whitespace(),
+        }
     }
 }
 
