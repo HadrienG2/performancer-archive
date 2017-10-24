@@ -4,6 +4,7 @@ mod cpu;
 mod interrupts;
 mod paging;
 
+use ::parser::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use chrono::{DateTime, TimeZone, Utc};
 use std::fmt::Debug;
@@ -14,18 +15,18 @@ use std::str::FromStr;
 define_sampler!{ Sampler : "/proc/stat" => Parser => SampledData }
 
 
-/// Streaming parser for /proc/stat
-///
-/// TODO: Decide whether a more extensive description is needed
-///
+/// Incremental parser for /proc/stat
 pub struct Parser {}
 //
-impl Parser {
+impl PseudoFileParser for Parser {
     /// Build a parser, using initial file contents for schema analysis
-    pub fn new(_initial_contents: &str) -> Self {
+    fn new(_initial_contents: &str) -> Self {
         Self {}
     }
-
+}
+//
+// TODO: Implement IncrementalParser once that trait is usable in stable Rust
+impl Parser {
     /// Parse a pseudo-file sample into a stream of records
     pub fn parse<'a>(&mut self, file_contents: &'a str) -> RecordStream<'a> {
         RecordStream::new(file_contents)
@@ -710,7 +711,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use ::splitter::split_line_and_run;
     use super::{cpu, interrupts, paging};
-    use super::{Parser, Record, RecordKind, RecordStream, SampledData};
+    use super::{Parser, PseudoFileParser, Record, RecordKind, RecordStream,
+                SampledData};
 
     /// Check that CPU stats are parsed properly
     #[test]

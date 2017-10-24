@@ -1,5 +1,6 @@
 //! This module contains a sampling parser for /proc/meminfo
 
+use ::parser::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use bytesize::ByteSize;
 use std::iter::Fuse;
@@ -8,19 +9,19 @@ use std::iter::Fuse;
 define_sampler!{ Sampler : "/proc/meminfo" => Parser => SampledData }
 
 
-/// Streaming parser for /proc/meminfo
-///
-/// TODO: Decide whether a more extensive description is needed
-///
+/// Incremental parser for /proc/meminfo
 #[derive(Debug, PartialEq)]
 pub struct Parser {}
 //
-impl Parser {
+impl PseudoFileParser for Parser {
     /// Build a parser, using initial file contents for schema analysis
-    pub fn new(_initial_contents: &str) -> Self {
+    fn new(_initial_contents: &str) -> Self {
         Self {}
     }
-
+}
+//
+// TODO: Implement IncrementalParser once that trait is usable in stable Rust
+impl Parser {
     /// Parse a pseudo-file sample into a stream of records
     pub fn parse<'a>(&mut self, file_contents: &'a str) -> RecordStream<'a> {
         RecordStream::new(file_contents)
@@ -436,7 +437,8 @@ mod tests {
     use bytesize;
     use ::splitter::split_line_and_run;
     use super::{ByteSize, Field, FieldStream, FieldKind, FieldStreamState,
-                Parser, RecordStream, SampledData, SampledPayloads};
+                Parser, PseudoFileParser, RecordStream, SampledData,
+                SampledPayloads};
 
     /// Check that label field parsing works as expected
     #[test]
@@ -630,11 +632,11 @@ mod tests {
     #[test]
     fn sampled_data() {
         // Let's build ourselves a fake meminfo file
-        let initial_contents = ["Something:  9876",
-                                "Somewhere:  6513 kB",
-                                "Went:       98743 kB",
-                                "Terribly:   48961",
-                                "Wrong:      5474"].join("\n");
+        let initial_contents = ["What:     9876",
+                                "Could:    6513 kB",
+                                "Possibly: 98743 kB",
+                                "Go:       48961",
+                                "Wrong:    5474"].join("\n");
 
         // Build a data sampler for that file
         let initial_records = RecordStream::new(&initial_contents);
@@ -645,20 +647,20 @@ mod tests {
                        SampledPayloads::DataVolume(Vec::new()),
                        SampledPayloads::Counter(Vec::new()),
                        SampledPayloads::Counter(Vec::new())],
-            keys: vec!["Something".to_string(),
-                       "Somewhere".to_string(),
-                       "Went".to_string(),
-                       "Terribly".to_string(),
+            keys: vec!["What".to_string(),
+                       "Could".to_string(),
+                       "Possibly".to_string(),
+                       "Go".to_string(),
                        "Wrong".to_string()]
         });
         assert_eq!(sampled_data.len(), 0);
 
         // Try to acquire one data sample and see how well that works out
-        let file_contents = ["Something:  9876",
-                             "Somewhere:  6514 kB",
-                             "Went:       98753 kB",
-                             "Terribly:   50161",
-                             "Wrong:      6484"].join("\n");
+        let file_contents = ["What:     9876",
+                             "Could:    6514 kB",
+                             "Possibly: 98753 kB",
+                             "Go:       50161",
+                             "Wrong:    6484"].join("\n");
         let file_records = RecordStream::new(&file_contents);
         sampled_data.push(file_records);
         assert_eq!(sampled_data, SampledData {
@@ -667,10 +669,10 @@ mod tests {
                        SampledPayloads::DataVolume(vec![ByteSize::kib(98753)]),
                        SampledPayloads::Counter(vec![50161]),
                        SampledPayloads::Counter(vec![6484])],
-            keys: vec!["Something".to_string(),
-                       "Somewhere".to_string(),
-                       "Went".to_string(),
-                       "Terribly".to_string(),
+            keys: vec!["What".to_string(),
+                       "Could".to_string(),
+                       "Possibly".to_string(),
+                       "Go".to_string(),
                        "Wrong".to_string()]
         });
         assert_eq!(sampled_data.len(), 1);
