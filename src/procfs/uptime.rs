@@ -13,12 +13,16 @@ define_sampler!{ Sampler : "/proc/uptime" => Parser => SampledData }
 pub struct Parser {}
 //
 impl PseudoFileParser for Parser {
-    /// Build a parser, using initial file contents for schema analysis
+    /// Build a parser, using an initial file sample. Here, this is used to
+    /// perform quick schema validation, just to maximize the odds that failure,
+    /// if any, will occur at initialization time rather than run time.
     fn new(initial_contents: &str) -> Self {
-        // TODO: Check that it parses as well
-        let col_count = initial_contents.split_whitespace().count();
-        assert!(col_count >= 2, "Uptime and idle time should be present");
-        debug_assert_eq!(col_count, 2, "Unsupported entry in /proc/uptime");
+        let mut raw_fields = initial_contents.split_whitespace();
+        for _ in 0..2 {
+            let field = raw_fields.next().expect("Missing uptime or idle time");
+            FieldStream::parse_duration_secs(field);
+        }
+        debug_assert_eq!(raw_fields.next(), None, "Unsupported field detected");
         Self {}
     }
 }
@@ -119,11 +123,7 @@ struct SampledData {
 //
 impl SampledData {
     /// Create a new uptime data store
-    fn new(stream: FieldStream) -> Self {
-        let field_count = stream.count();
-        // TODO: That's redundant with parser initialization, remove it
-        assert!(field_count >= 2, "Missing expected entry in /proc/uptime");
-        debug_assert_eq!(field_count, 2, "Unsupported entry in /proc/uptime");
+    fn new(_stream: FieldStream) -> Self {
         Self {
             wall_clock_uptime: Vec::new(),
             cpu_idle_time: Vec::new(),
