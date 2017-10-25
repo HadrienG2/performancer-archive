@@ -18,6 +18,7 @@ extern crate testbench;
 
 #[macro_use] mod sampler;
 
+mod data;
 mod parser;
 pub mod procfs;
 mod reader;

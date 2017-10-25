@@ -16,6 +16,7 @@ pub struct Parser {}
 impl PseudoFileParser for Parser {
     /// Build a parser, using initial file contents for schema analysis
     fn new(_initial_contents: &str) -> Self {
+        // TODO: Perform initial file format validation?
         Self {}
     }
 }

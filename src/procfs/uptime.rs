@@ -1,12 +1,13 @@
 //! This module contains a sampling parser for /proc/uptime
 
+use ::data::SampledData;
 use ::parser::PseudoFileParser;
 use std::str::SplitWhitespace;
 use std::time::Duration;
 
 
 // Implement a sampler for /proc/uptime
-define_sampler!{ Sampler : "/proc/uptime" => Parser => SampledData }
+define_sampler!{ Sampler : "/proc/uptime" => Parser => Data }
 
 
 /// Incremental parser for /proc/uptime
@@ -113,7 +114,7 @@ impl<'a> FieldStream<'a> {
 
 
 /// Data samples from /proc/uptime, in structure-of-array layout
-struct SampledData {
+pub struct Data {
     /// Elapsed wall clock time since the system was started
     wall_clock_uptime: Vec<Duration>,
 
@@ -121,7 +122,17 @@ struct SampledData {
     cpu_idle_time: Vec<Duration>,
 }
 //
-impl SampledData {
+impl SampledData for Data {
+    /// Tell how many samples are present in the data store + check consistency
+    fn len(&self) -> usize {
+        let length = self.wall_clock_uptime.len();
+        debug_assert_eq!(length, self.cpu_idle_time.len());
+        length
+    }
+}
+//
+// TODO: Implement SampledDataIncremental once that is usable in stable Rust
+impl Data {
     /// Create a new uptime data store
     fn new(_stream: FieldStream) -> Self {
         Self {
@@ -145,14 +156,6 @@ impl SampledData {
         debug_assert_eq!(stream.next(), None,
                          "Unsupported entry in /proc/uptime");
     }
-
-    /// Tell how many samples are present in the data store
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        let length = self.wall_clock_uptime.len();
-        debug_assert_eq!(length, self.cpu_idle_time.len());
-        length
-    }
 }
 
 
@@ -161,7 +164,8 @@ impl SampledData {
 mod tests {
     use std::thread;
     use std::time::Duration;
-    use super::{FieldStream, Parser, PseudoFileParser, SampledData, Sampler};
+    use super::{Data, FieldStream, Parser, PseudoFileParser, SampledData,
+                Sampler};
 
     /// Check that our Duration parser works as expected
     #[test]
@@ -202,7 +206,7 @@ mod tests {
     fn init_container() {
         let initial = "16.191963 19686.615";
         let mut parser = Parser::new(initial);
-        let data = SampledData::new(parser.parse(initial));
+        let data = Data::new(parser.parse(initial));
         assert_eq!(data.wall_clock_uptime.len(), 0);
         assert_eq!(data.cpu_idle_time.len(), 0);
         assert_eq!(data.len(), 0);
@@ -213,7 +217,7 @@ mod tests {
     fn push_data() {
         let initial = "145.16 16546.1469";
         let mut parser = Parser::new(initial);
-        let mut data = SampledData::new(parser.parse(initial));
+        let mut data = Data::new(parser.parse(initial));
         data.push(parser.parse("614.461  10645.163"));
         assert_eq!(data.wall_clock_uptime,
                    vec![Duration::new(614, 461_000_000)]);
