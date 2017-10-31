@@ -21,8 +21,8 @@
 ///                                                   => MemInfoData)`
 ///
 /// ...defines a sampler called "MemInfoSampler" which loads data from the file
-/// /proc/meminfo and feeds it to a parser of type "MemInfoParser", which will
-/// eventually store the parsed data into a container called "MemInfoData".
+/// /proc/meminfo and feeds it to a parser of type "MemInfoParser", and then
+/// stores the parsed data into a container called "MemInfoData".
 ///
 /// In today's Rust, this job must be done via macros, because Rust does not yet
 /// support generics with value parameters. In future Rust, once this genericity
