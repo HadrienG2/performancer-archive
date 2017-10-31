@@ -20,13 +20,13 @@ impl RecordFields {
     pub fn new<'a, 'b>(mut data_columns: SplitColumns<'a, 'b>) -> Self {
         // Scope added to address current borrow checker limitation
         let (incoming, outgoing) = {
-            /// This is how we decode one field from the input
+            // This is how we decode one field from the input
             let mut parse_counter = || -> u64 {
                 data_columns.next().expect("Missing paging counter")
                             .parse().expect("Failed to parse paging counter")
             };
 
-            /// Parse the counters of incoming and outgoing pages
+            // Parse the counters of incoming and outgoing pages
             (parse_counter(), parse_counter())
         };
 
@@ -34,7 +34,7 @@ impl RecordFields {
         debug_assert_eq!(data_columns.next(), None,
                          "Unexpected additional paging counter");
 
-        /// Return the paging counters
+        // Return the paging counters
         Self {
             incoming,
             outgoing,

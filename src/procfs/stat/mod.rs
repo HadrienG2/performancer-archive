@@ -85,7 +85,7 @@ impl<'a, 'b> Record<'a, 'b> {
     /// Tell how the active record should be parsed (if at all)
     fn kind(&self) -> RecordKind {
         match self.header {
-            /// The header of global stats starts with "cpu"
+            // The header of global stats starts with "cpu"
             cpu_header if (cpu_header.len() >= 3) &&
                           (&cpu_header[0..3] == "cpu") => {
                 if cpu_header.len() == 3 {
@@ -102,23 +102,23 @@ impl<'a, 'b> Record<'a, 'b> {
                 }
             },
 
-            /// The header of paging statistics is "page" or "swap"
+            // The header of paging statistics is "page" or "swap"
             "page" => RecordKind::PagingTotal,
             "swap" => RecordKind::PagingSwap,
 
-            /// The header of hardware IRQ activity is "intr"
+            // The header of hardware IRQ activity is "intr"
             "intr" => RecordKind::InterruptsHW,
 
-            /// The header of the context switch counter is "ctxt"
+            // The header of the context switch counter is "ctxt"
             "ctxt" => RecordKind::ContextSwitches,
 
-            /// The header of the boot time is "btime"
+            // The header of the boot time is "btime"
             "btime" => RecordKind::BootTime,
 
-            /// The header of total process forking activity is "processes"
+            // The header of total process forking activity is "processes"
             "processes" => RecordKind::ProcessForks,
 
-            /// Current process activity has a header starting with "procs_"
+            // Current process activity has a header starting with "procs_"
             procs_header if (procs_header.len() > 6) &&
                             (&procs_header[0..6] == "procs_") => {
                 match &procs_header[6..] {
@@ -128,10 +128,10 @@ impl<'a, 'b> Record<'a, 'b> {
                 }
             }
 
-            /// The header of software IRQ activity is "softirq"
+            // The header of software IRQ activity is "softirq"
             "softirq" => RecordKind::InterruptsSW,
 
-            /// This header is not supported
+            // This header is not supported
             other_header => RecordKind::Unsupported(other_header.to_owned())
         }
     }
@@ -154,27 +154,27 @@ impl<'a, 'b> Record<'a, 'b> {
                 (self.header[3..].parse() == Ok(thread_id))
             },
 
-            /// Check for paging statistics
+            // Check for paging statistics
             RecordKind::PagingTotal => (self.header == "page"),
             RecordKind::PagingSwap => (self.header == "swap"),
 
-            /// Check for hardware IRQ acticity
+            // Check for hardware IRQ acticity
             RecordKind::InterruptsHW => (self.header == "intr"),
 
-            /// Check for context switch counter
+            // Check for context switch counter
             RecordKind::ContextSwitches => (self.header == "ctxt"),
 
-            /// Check for the boot time
+            // Check for the boot time
             RecordKind::BootTime => (self.header == "btime"),
 
-            /// Check for total process forking activity
+            // Check for total process forking activity
             RecordKind::ProcessForks => (self.header == "processes"),
 
-            /// Check for current process activity
+            // Check for current process activity
             RecordKind::ProcessesRunnable => (self.header == "procs_running"),
             RecordKind::ProcessesBlocked => (self.header == "procs_blocked"),
 
-            /// Check for software IRQ activity
+            // Check for software IRQ activity
             RecordKind::InterruptsSW => (self.header == "softirq"),
 
             // Check for unsupported headers
