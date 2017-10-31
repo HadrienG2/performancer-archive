@@ -1,12 +1,13 @@
 //! This module contains a sampling parser for /proc/meminfo
 
+use ::data::SampledData;
 use ::parser::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use bytesize::ByteSize;
 use std::iter::Fuse;
 
 // Implement a sampler for /proc/meminfo
-define_sampler!{ Sampler : "/proc/meminfo" => Parser => SampledData }
+define_sampler!{ Sampler : "/proc/meminfo" => Parser => Data }
 
 
 /// Incremental parser for /proc/meminfo
@@ -267,7 +268,7 @@ pub enum FieldKind {
 /// to build and use a HashMap for this purpose.
 ///
 #[derive(Debug, PartialEq)]
-struct SampledData {
+pub struct Data {
     /// Sampled meminfo payloads, in the order in which it appears in the file
     data: Vec<SampledPayloads>,
 
@@ -275,7 +276,22 @@ struct SampledData {
     keys: Vec<String>,
 }
 //
-impl SampledData {
+impl SampledData for Data {
+    /// Tell how many samples are present in the data store + check consistency
+    fn len(&self) -> usize {
+        // We'll return the length of the first record, if any, or else zero
+        let length = self.data.first().map_or(0, |rec| rec.len());
+
+        // In debug mode, check that all records have the same length
+        debug_assert!(self.data.iter().all(|rec| rec.len() == length));
+
+        // Return the number of samples in the data store
+        length
+    }
+}
+//
+// TODO: Implement SampledDataIncremental once that is usable in stable Rust
+impl Data {
     /// Create a new memory info data store, using a first sample to know the
     /// structure of /proc/meminfo on this system
     fn new(mut stream: RecordStream) -> Self {
@@ -338,20 +354,6 @@ impl SampledData {
         // In debug mode, we also check that records did not appear out of blue
         debug_assert!(stream.next().is_none(),
                       "A meminfo record appeared out of nowhere");
-    }
-
-    /// Tell how many samples are present in the data store, and in debug mode
-    /// check for internal data store consistency
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        // We'll return the length of the first record, if any, or else zero
-        let length = self.data.first().map_or(0, |rec| rec.len());
-
-        // In debug mode, check that all records have the same length
-        debug_assert!(self.data.iter().all(|rec| rec.len() == length));
-
-        // Return the number of samples in the data store
-        length
     }
 }
 
@@ -421,7 +423,6 @@ impl SampledPayloads {
     }
 
     /// Tell how many samples are present in the data store
-    #[cfg(test)]
     fn len(&self) -> usize {
         match *self {
             SampledPayloads::DataVolume(ref v)  => v.len(),
@@ -437,7 +438,7 @@ impl SampledPayloads {
 mod tests {
     use bytesize;
     use ::splitter::split_line_and_run;
-    use super::{ByteSize, Field, FieldStream, FieldKind, FieldStreamState,
+    use super::{ByteSize, Data, Field, FieldStream, FieldKind, FieldStreamState,
                 Parser, PseudoFileParser, RecordStream, SampledData,
                 SampledPayloads};
 
@@ -506,7 +507,7 @@ mod tests {
     /// Check that sampled payloads container works as expected...
     #[test]
     fn sampled_payloads() {
-        /// ...with data volume payloads
+        // ...with data volume payloads
         let mut data_payloads = with_data_volume_field(ByteSize::kib(768),
                                                        SampledPayloads::new);
         assert_eq!(data_payloads,
@@ -641,8 +642,8 @@ mod tests {
 
         // Build a data sampler for that file
         let initial_records = RecordStream::new(&initial_contents);
-        let mut sampled_data = SampledData::new(initial_records);
-        assert_eq!(sampled_data, SampledData {
+        let mut sampled_data = Data::new(initial_records);
+        assert_eq!(sampled_data, Data {
             data: vec![SampledPayloads::Counter(Vec::new()),
                        SampledPayloads::DataVolume(Vec::new()),
                        SampledPayloads::DataVolume(Vec::new()),
@@ -664,7 +665,7 @@ mod tests {
                              "Wrong:    6484"].join("\n");
         let file_records = RecordStream::new(&file_contents);
         sampled_data.push(file_records);
-        assert_eq!(sampled_data, SampledData {
+        assert_eq!(sampled_data, Data {
             data: vec![SampledPayloads::Counter(vec![9876]),
                        SampledPayloads::DataVolume(vec![ByteSize::kib(6514)]),
                        SampledPayloads::DataVolume(vec![ByteSize::kib(98753)]),
