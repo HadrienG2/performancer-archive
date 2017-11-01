@@ -96,6 +96,7 @@ impl<'a, 'b> Record<'a, 'b> {
 ///
 ///
 /// Payload from a /proc/meminfo record (data volume or counter)
+#[derive(Debug, PartialEq)]
 pub struct Payload<'a> {
     /// Amount of the quantity being measured (data or a count of something)
     amount: u64,
@@ -340,18 +341,86 @@ mod tests {
                        ByteSize::mib(713705));
         });
 
-        // Invalid data volume unit
-        let invalid_unit = split_line_and_run("1337 zorglub", Payload::new);
-        assert_eq!(invalid_unit.kind(), PayloadKind::Unsupported);
-
         // Valid raw counter
         with_counter_payload(911, |valid_counter_payload| {
             assert_eq!(valid_counter_payload.kind(), PayloadKind::Counter);
             assert_eq!(valid_counter_payload.parse_counter(), 911);
         });
+
+        // Unsupported payload type
+        with_unsupported_payload(|unsupported_payload| {
+            assert_eq!(unsupported_payload.kind(), PayloadKind::Unsupported);
+        });
     }
 
-    /// Get a field that parses into a data volume and do something with it
+    /// Check that sampled payload containers work as expected...
+    #[test]
+    fn sampled_payloads() {
+        // ...with data volume payloads
+        let mut data_payloads = with_data_volume_payload(ByteSize::kib(768),
+                                                         SampledPayloads::new);
+        assert_eq!(data_payloads,
+                   SampledPayloads::DataVolume(Vec::new()));
+        assert_eq!(data_payloads.len(), 0);
+        let sample_data = ByteSize::gib(2);
+        with_data_volume_payload(sample_data,
+                                 |payload| data_payloads.push(payload));
+        assert_eq!(data_payloads,
+                   SampledPayloads::DataVolume(vec![sample_data]));
+        assert_eq!(data_payloads.len(), 1);
+
+        // ...with raw counter payloads
+        let mut counter_payloads = with_counter_payload(42,
+                                                        SampledPayloads::new);
+        assert_eq!(counter_payloads,
+                   SampledPayloads::Counter(Vec::new()));
+        assert_eq!(counter_payloads.len(), 0);
+        let sample_count = 6463;
+        with_counter_payload(sample_count,
+                             |payload| counter_payloads.push(payload));
+        assert_eq!(counter_payloads,
+                   SampledPayloads::Counter(vec![sample_count]));
+        assert_eq!(counter_payloads.len(), 1);
+        
+        // ...and with unsupported payloads
+        let mut unsupported_payloads =
+            with_unsupported_payload(SampledPayloads::new);
+        assert_eq!(unsupported_payloads, SampledPayloads::Unsupported(0));
+        assert_eq!(unsupported_payloads.len(), 0);
+        with_unsupported_payload(|unsupported_payload| {
+            unsupported_payloads.push(unsupported_payload)
+        });
+        assert_eq!(unsupported_payloads, SampledPayloads::Unsupported(1));
+        assert_eq!(unsupported_payloads.len(), 1);
+    }
+
+    /// Check that record parsing works as expected
+    #[test]
+    fn record_parsing() {
+        with_record("MyCrazyLabel: 10248 kB", |record| {
+            assert_eq!(record.label(), "MyCrazyLabel");
+            let payload = record.extract_payload();
+            assert_eq!(payload.kind(), PayloadKind::DataVolume);
+            assert_eq!(payload.parse_data_volume(), ByteSize::kib(10248));
+        });
+    }
+
+    /// Check that record streams work as expected
+    #[test]
+    fn record_stream() {
+        // Build a pseudo-file from a set of records
+        let pseudo_file = ["OneRecord: 321 kB",
+                           "TwoRecords: 9786",
+                           "StupidRecord: 47 MeV"].join("\n");
+
+        // This is the associated record stream
+        let record_stream = RecordStream::new(&pseudo_file);
+
+        // Check that our test record stream looks as expected
+        check_record_stream(record_stream, &pseudo_file);
+    }
+
+    /// Call a function with a payload that parses into a certain data volume
     fn with_data_volume_payload<F, R>(data_volume: ByteSize, operation: F) -> R
         where F: FnOnce(Payload) -> R
     {
@@ -366,7 +435,7 @@ mod tests {
         operation(payload)
     }
 
-    /// Get a field that parses into a raw counter and do something with it
+    /// Call a function with a payload that parses into a certain raw count
     fn with_counter_payload<F, R>(counter: u64, operation: F) -> R
         where F: FnOnce(Payload) -> R
     {
@@ -380,133 +449,40 @@ mod tests {
         operation(payload)
     }
 
-    /* /// Check that label field parsing works as expected
-    #[test]
-    fn label_field_parsing() {
-        // Supported label field
-        with_label_field("MyLabel", |valid_label| {
-            assert_eq!(valid_label.kind(), FieldKind::Label);
-            assert_eq!(valid_label.parse_label(), "MyLabel");
-        });
+    /// Call a function with an unsupported payload
+    fn with_unsupported_payload<F, R>(operation: F) -> R
+        where F: FnOnce(Payload) -> R
+    {
+        // Create an unsupported payload
+        let payload = split_line_and_run(&"1337 zorglub", Payload::new);
 
-        // Missing colon
-        let missing_colon = Field {
-            file_columns: [Some("MyOtherLabel"), None],
-            stream_state: FieldStreamState::OnLabel,
-        };
-        assert_eq!(missing_colon.kind(), FieldKind::Unsupported);
-
-        // Missing data
-        let missing_data = Field {
-            file_columns: [None, None],
-            stream_state: FieldStreamState::OnLabel,
-        };
-        assert_eq!(missing_data.kind(), FieldKind::Unsupported);
+        // Run the user-provided functor on that field and return the result
+        operation(payload)
     }
 
-    /// Check that sampled payloads container works as expected...
-    #[test]
-    fn sampled_payloads() {
-        // ...with data volume payloads
-        let mut data_payloads = with_data_volume_field(ByteSize::kib(768),
-                                                       SampledPayloads::new);
-        assert_eq!(data_payloads,
-                   SampledPayloads::DataVolume(Vec::new()));
-        assert_eq!(data_payloads.len(), 0);
-        let sample_data = ByteSize::gib(2);
-        with_data_volume_field(sample_data, |field| data_payloads.push(field));
-        assert_eq!(data_payloads,
-                   SampledPayloads::DataVolume(vec![sample_data]));
-        assert_eq!(data_payloads.len(), 1);
-
-        // ...with raw counter payloads
-        let mut counter_payloads = with_counter_field(42, SampledPayloads::new);
-        assert_eq!(counter_payloads,
-                   SampledPayloads::Counter(Vec::new()));
-        assert_eq!(counter_payloads.len(), 0);
-        let sample_count = 6463;
-        with_counter_field(sample_count, |field| counter_payloads.push(field));
-        assert_eq!(counter_payloads,
-                   SampledPayloads::Counter(vec![sample_count]));
-        assert_eq!(counter_payloads.len(), 1);
-        
-        // ...and with unsupported payloads
-        let unsupported_field = Field {
-            file_columns: [None, None],
-            stream_state: FieldStreamState::OnPayload,
-        };
-        let mut unsupported_payloads =
-            SampledPayloads::new(unsupported_field.clone());
-        assert_eq!(unsupported_payloads, SampledPayloads::Unsupported(0));
-        assert_eq!(unsupported_payloads.len(), 0);
-        unsupported_payloads.push(unsupported_field);
-        assert_eq!(unsupported_payloads, SampledPayloads::Unsupported(1));
-        assert_eq!(unsupported_payloads.len(), 1);
+    /// Call a function with a record matching a certain line of meminfo text
+    fn with_record<F, R>(record_str: &str, operation: F) -> R
+        where F: FnOnce(Record) -> R
+    {
+        split_line_and_run(record_str, |record_columns| {
+            let record = Record::new(record_columns);
+            operation(record)
+        })
     }
 
-    /// Check that field streams work as expected...
-    #[test]
-    fn field_stream() {
-        // ...on streamed data volumes...
-        with_field_stream("Test: 42 kB", |mut field_stream| {
-            assert_eq!(field_stream.next(),
-                       Field {
-                           file_columns: [Some("Test:"), None],
-                           stream_state: FieldStreamState::OnLabel,
-                       });
-            assert_eq!(field_stream.next(),
-                       Field {
-                           file_columns: [Some("42"), Some("kB")],
-                           stream_state: FieldStreamState::OnPayload,
-                       });
-        });
-
-        // ...on streamed raw counters...
-        with_field_stream("OtherTest: 1984", |mut field_stream| {
-            assert_eq!(field_stream.next(),
-                       Field {
-                           file_columns: [Some("OtherTest:"), None],
-                           stream_state: FieldStreamState::OnLabel,
-                       });
-            assert_eq!(field_stream.next(),
-                       Field {
-                           file_columns: [Some("1984"), None],
-                           stream_state: FieldStreamState::OnPayload,
-                       });
-        });
-
-        // ...and even on blank lines, because who knows what's going to happen
-        // to meminfo's format in the future? I sure don't. That's one of the
-        // problems with human-readable text files as an OS kernel API.
-        with_field_stream(" ", |mut field_stream| {
-            assert_eq!(field_stream.next(),
-                       Field {
-                           file_columns: [None, None],
-                           stream_state: FieldStreamState::OnLabel,
-                       });
-            assert_eq!(field_stream.next(),
-                       Field {
-                           file_columns: [None, None],
-                           stream_state: FieldStreamState::OnPayload,
-                       });
-        });
+    /// Test that the output of a record stream is right for a given input file
+    fn check_record_stream(mut stream: RecordStream, file_contents: &str) {
+        for record_str in file_contents.lines() {
+            with_record(record_str, |expected_record| {
+                let actual_record = stream.next().unwrap();
+                assert_eq!(actual_record.label(), expected_record.label());
+                assert_eq!(actual_record.extract_payload(),
+                           expected_record.extract_payload());
+            });
+        }
     }
 
-    /// Check that record streams work as expected
-    #[test]
-    fn record_stream() {
-        // Build a pseudo-file from a set of records
-        let pseudo_file = ["OneRecord: 321 kB",
-                           "TwoRecords: 9786",
-                           " ",
-                           "Dafuk?"].join("\n");
-
-        // This is the associated record stream
-        let record_stream = RecordStream::new(&pseudo_file);
-
-        // Check that our test record stream looks as expected
-        check_record_stream(record_stream, &pseudo_file);
-    }
+    /*
 
     /// Check that parsers work as expected
     #[test]
@@ -578,48 +554,7 @@ mod tests {
                        "Wrong".to_string()]
         });
         assert_eq!(sampled_data.len(), 1);
-    }
-
-    /// Get a field that parses into a label and do something with it
-    fn with_label_field<F, R>(label: &str, operation: F) -> R
-        where F: FnOnce(Field) -> R
-    {
-        // Build the label's tag
-        let mut label_tag = String::with_capacity(label.len()+1);
-        label_tag.push_str(label);
-        label_tag.push(':');
-
-        // Create a corresponding field struct
-        let field = Field {
-            file_columns: [Some(&label_tag), None],
-            stream_state: FieldStreamState::OnLabel,
-        };
-
-        // Run the user-provided functor on that field and return the result
-        operation(field)
-    }
-
-    /// Build the field stream associated with a certain line of text, and run
-    /// code taking it as a parameter
-    fn with_field_stream<F, R>(line_of_text: &str, functor: F) -> R
-        where F: FnOnce(FieldStream) -> R
-    {
-        split_line_and_run(line_of_text, |columns| {
-            let field_stream = FieldStream::new(columns);
-            functor(field_stream)
-        })
-    }
-
-    /// Test that the output of a record stream is right for a given input file
-    fn check_record_stream(mut stream: RecordStream, file_contents: &str) {
-        for record in file_contents.lines() {
-            with_field_stream(record, |mut expected_fields| {
-                let mut actual_fields = stream.next().unwrap();
-                assert_eq!(actual_fields.next(), expected_fields.next());
-                assert_eq!(actual_fields.next(), expected_fields.next());
-            });
-        }
-    } */
+    }*/
 
     /// Check that the sampler works well
     define_sampler_tests!{ super::Sampler }
