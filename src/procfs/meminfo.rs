@@ -14,9 +14,17 @@ define_sampler!{ Sampler : "/proc/meminfo" => Parser => Data }
 pub struct Parser {}
 //
 impl PseudoFileParser for Parser {
-    /// Build a parser, using initial file contents for schema analysis
-    fn new(_initial_contents: &str) -> Self {
-        // TODO: Perform initial file format validation?
+    /// Build a parser, using an initial file sample. Here, this is used to
+    /// perform quick schema validation, just to maximize the odds that failure,
+    /// if any, will occur at initialization time rather than run time.
+    fn new(initial_contents: &str) -> Self {
+        let mut validation_stream = RecordStream::new(initial_contents);
+        while let Some(record) = validation_stream.next() {
+            let label = record.label();
+            let payload = record.extract_payload();
+            debug_assert!(payload.kind() != PayloadKind::Unsupported,
+                          "Missing support for record {}", label);
+        }
         Self {}
     }
 }
@@ -209,11 +217,6 @@ impl Data {
 
             // Analyze the record's data payload
             let data = SampledPayloads::new(record.extract_payload());
-
-            // Report unsupported payloads in debug mode
-            debug_assert!(data != SampledPayloads::Unsupported(0),
-                          "Missing support for a meminfo record named {}",
-                          label);
 
             // Memorize the key and payload store in our data store
             store.keys.push(label.to_owned());
