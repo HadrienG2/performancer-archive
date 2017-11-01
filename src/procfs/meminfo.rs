@@ -327,8 +327,58 @@ impl SampledPayloads {
 mod tests {
     use bytesize;
     use ::splitter::split_line_and_run;
-    use super::{ByteSize, Data, Parser, Payload, PseudoFileParser, Record,
-                RecordStream, SampledData, SampledPayloads};
+    use super::{ByteSize, Data, Parser, Payload, PayloadKind, PseudoFileParser,
+                Record, RecordStream, SampledData, SampledPayloads};
+
+    /// Check that payload parsing works as expected
+    #[test]
+    fn payload_parsing() {
+        // Valid data volume payload
+        with_data_volume_payload(ByteSize::mib(713705), |valid_data_payload| {
+            assert_eq!(valid_data_payload.kind(), PayloadKind::DataVolume);
+            assert_eq!(valid_data_payload.parse_data_volume(),
+                       ByteSize::mib(713705));
+        });
+
+        // Invalid data volume unit
+        let invalid_unit = split_line_and_run("1337 zorglub", Payload::new);
+        assert_eq!(invalid_unit.kind(), PayloadKind::Unsupported);
+
+        // Valid raw counter
+        with_counter_payload(911, |valid_counter_payload| {
+            assert_eq!(valid_counter_payload.kind(), PayloadKind::Counter);
+            assert_eq!(valid_counter_payload.parse_counter(), 911);
+        });
+    }
+
+    /// Get a field that parses into a data volume and do something with it
+    fn with_data_volume_payload<F, R>(data_volume: ByteSize, operation: F) -> R
+        where F: FnOnce(Payload) -> R
+    {
+        // Translate the data volume into meminfo-like text
+        let mut text = (data_volume.as_usize() / bytesize::KIB).to_string();
+        text.push_str(" kB");
+
+        // Create a corresponding payload
+        let payload = split_line_and_run(&text, Payload::new);
+
+        // Run the user-provided functor on that field and return the result
+        operation(payload)
+    }
+
+    /// Get a field that parses into a raw counter and do something with it
+    fn with_counter_payload<F, R>(counter: u64, operation: F) -> R
+        where F: FnOnce(Payload) -> R
+    {
+        // Translate the counter into text
+        let text = counter.to_string();
+
+        // Create a corresponding payload
+        let payload = split_line_and_run(&text, Payload::new);
+
+        // Run the user-provided functor on that field and return the result
+        operation(payload)
+    }
 
     /* /// Check that label field parsing works as expected
     #[test]
@@ -352,44 +402,6 @@ mod tests {
             stream_state: FieldStreamState::OnLabel,
         };
         assert_eq!(missing_data.kind(), FieldKind::Unsupported);
-    }
-
-    /// Check that payload field parsing works as expected
-    #[test]
-    fn payload_field_parsing() {
-        // Valid data volume payload
-        with_data_volume_field(ByteSize::mib(713705), |valid_data_volume| {
-            assert_eq!(valid_data_volume.kind(), FieldKind::DataVolume);
-            assert_eq!(valid_data_volume.parse_data_volume(),
-                       ByteSize::mib(713705));
-        });
-
-        // Invalid data volume unit
-        let invalid_unit = Field {
-            file_columns: [Some("1337"), Some("zorglub")],
-            stream_state: FieldStreamState::OnPayload,
-        };
-        assert_eq!(invalid_unit.kind(), FieldKind::Unsupported);
-
-        // Invalid data volume counter
-        let invalid_data_count = Field {
-            file_columns: [Some("quarante-deux"), Some("kB")],
-            stream_state: FieldStreamState::OnPayload,
-        };
-        assert_eq!(invalid_data_count.kind(), FieldKind::Unsupported);
-
-        // Valid raw counter
-        with_counter_field(911, |valid_counter| {
-            assert_eq!(valid_counter.kind(), FieldKind::Counter);
-            assert_eq!(valid_counter.parse_counter(), 911);
-        });
-
-        // Invalid raw counter
-        let invalid_counter = Field {
-            file_columns: [Some("Robespierre"), None],
-            stream_state: FieldStreamState::OnPayload,
-        };
-        assert_eq!(invalid_counter.kind(), FieldKind::Unsupported);
     }
 
     /// Check that sampled payloads container works as expected...
@@ -581,40 +593,6 @@ mod tests {
         let field = Field {
             file_columns: [Some(&label_tag), None],
             stream_state: FieldStreamState::OnLabel,
-        };
-
-        // Run the user-provided functor on that field and return the result
-        operation(field)
-    }
-
-    /// Get a field that parses into a data volume and do something with it
-    fn with_data_volume_field<F, R>(data_volume: ByteSize, operation: F) -> R
-        where F: FnOnce(Field) -> R
-    {
-        // Build the counter
-        let kib_counter = (data_volume.as_usize() / bytesize::KIB).to_string();
-
-        // Create a corresponding field struct
-        let field = Field {
-            file_columns: [Some(&kib_counter), Some("kB")],
-            stream_state: FieldStreamState::OnPayload,
-        };
-
-        // Run the user-provided functor on that field and return the result
-        operation(field)
-    }
-
-    /// Get a field that parses into a raw counter and do something with it
-    fn with_counter_field<F, R>(counter: u64, operation: F) -> R
-        where F: FnOnce(Field) -> R
-    {
-        // Build the counter
-        let raw_counter = counter.to_string();
-
-        // Create a corresponding field struct
-        let field = Field {
-            file_columns: [Some(&raw_counter), None],
-            stream_state: FieldStreamState::OnPayload,
         };
 
         // Run the user-provided functor on that field and return the result
