@@ -423,6 +423,76 @@ mod tests {
         check_record_stream(record_stream, &pseudo_file);
     }
 
+    /// Check that parsers work as expected
+    #[test]
+    fn parser() {
+        // Build a pseudo-file from a set of records, use that to init a parser
+        let initial_file = ["TwoPlusTwo: 5 kB",
+                            "Abc123: 666",
+                            "WTF: 3615 kB"].join("\n");
+        let mut parser = Parser::new(&initial_file);
+
+        // Now, build another file which is a variant of the first one, and
+        // check that the parser can ingest it just fine
+        let file_contents = ["TwoPlusTwo: 42 kB",
+                             "Abc123: 713705",
+                             "WTF: 3618 kB"].join("\n");
+        let record_stream = parser.parse(&file_contents);
+
+        // Check that our test record stream looks as expected
+        check_record_stream(record_stream, &file_contents);
+    }
+
+    /// Check that sampled data works as expected
+    #[test]
+    fn sampled_data() {
+        // Let's build ourselves a fake meminfo file
+        let initial_contents = ["What:     9876",
+                                "Could:    6513 kB",
+                                "Possibly: 98743 kB",
+                                "Go:       48961",
+                                "Wrong:    5474"].join("\n");
+
+        // Build a data sampler for that file
+        let initial_records = RecordStream::new(&initial_contents);
+        let mut sampled_data = Data::new(initial_records);
+        assert_eq!(sampled_data, Data {
+            data: vec![SampledPayloads::Counter(Vec::new()),
+                       SampledPayloads::DataVolume(Vec::new()),
+                       SampledPayloads::DataVolume(Vec::new()),
+                       SampledPayloads::Counter(Vec::new()),
+                       SampledPayloads::Counter(Vec::new())],
+            keys: vec!["What".to_string(),
+                       "Could".to_string(),
+                       "Possibly".to_string(),
+                       "Go".to_string(),
+                       "Wrong".to_string()]
+        });
+        assert_eq!(sampled_data.len(), 0);
+
+        // Try to acquire one data sample and see how well that works out
+        let file_contents = ["What:     9876",
+                             "Could:    6514 kB",
+                             "Possibly: 98753 kB",
+                             "Go:       50161",
+                             "Wrong:    6484"].join("\n");
+        let file_records = RecordStream::new(&file_contents);
+        sampled_data.push(file_records);
+        assert_eq!(sampled_data, Data {
+            data: vec![SampledPayloads::Counter(vec![9876]),
+                       SampledPayloads::DataVolume(vec![ByteSize::kib(6514)]),
+                       SampledPayloads::DataVolume(vec![ByteSize::kib(98753)]),
+                       SampledPayloads::Counter(vec![50161]),
+                       SampledPayloads::Counter(vec![6484])],
+            keys: vec!["What".to_string(),
+                       "Could".to_string(),
+                       "Possibly".to_string(),
+                       "Go".to_string(),
+                       "Wrong".to_string()]
+        });
+        assert_eq!(sampled_data.len(), 1);
+    }
+
     /// Call a function with a payload that parses into a certain data volume
     fn with_data_volume_payload<F, R>(data_volume: ByteSize, operation: F) -> R
         where F: FnOnce(Payload) -> R
@@ -484,80 +554,6 @@ mod tests {
             });
         }
     }
-
-    /*
-
-    /// Check that parsers work as expected
-    #[test]
-    fn parser() {
-        // Build a pseudo-file from a set of records, use that to init a parser
-        let initial_file = ["TwoPlusTwo: 5",
-                            "Abc123",
-                            " ",
-                            "ThreeRecords: 42 kB"].join("\n");
-        let mut parser = Parser::new(&initial_file);
-
-        // Now, build another file which is a variant of the first one, and
-        // check that the parser can ingest it just fine
-        let file_contents = ["TwoPlusTwo: 9486",
-                             "Abc123",
-                             " ",
-                             "ThreeRecords: 76415 kB"].join("\n");
-        let record_stream = parser.parse(&file_contents);
-
-        // Check that our test record stream looks as expected
-        check_record_stream(record_stream, &file_contents);
-    }
-
-    /// Check that sampled data works as expected
-    #[test]
-    fn sampled_data() {
-        // Let's build ourselves a fake meminfo file
-        let initial_contents = ["What:     9876",
-                                "Could:    6513 kB",
-                                "Possibly: 98743 kB",
-                                "Go:       48961",
-                                "Wrong:    5474"].join("\n");
-
-        // Build a data sampler for that file
-        let initial_records = RecordStream::new(&initial_contents);
-        let mut sampled_data = Data::new(initial_records);
-        assert_eq!(sampled_data, Data {
-            data: vec![SampledPayloads::Counter(Vec::new()),
-                       SampledPayloads::DataVolume(Vec::new()),
-                       SampledPayloads::DataVolume(Vec::new()),
-                       SampledPayloads::Counter(Vec::new()),
-                       SampledPayloads::Counter(Vec::new())],
-            keys: vec!["What".to_string(),
-                       "Could".to_string(),
-                       "Possibly".to_string(),
-                       "Go".to_string(),
-                       "Wrong".to_string()]
-        });
-        assert_eq!(sampled_data.len(), 0);
-
-        // Try to acquire one data sample and see how well that works out
-        let file_contents = ["What:     9876",
-                             "Could:    6514 kB",
-                             "Possibly: 98753 kB",
-                             "Go:       50161",
-                             "Wrong:    6484"].join("\n");
-        let file_records = RecordStream::new(&file_contents);
-        sampled_data.push(file_records);
-        assert_eq!(sampled_data, Data {
-            data: vec![SampledPayloads::Counter(vec![9876]),
-                       SampledPayloads::DataVolume(vec![ByteSize::kib(6514)]),
-                       SampledPayloads::DataVolume(vec![ByteSize::kib(98753)]),
-                       SampledPayloads::Counter(vec![50161]),
-                       SampledPayloads::Counter(vec![6484])],
-            keys: vec!["What".to_string(),
-                       "Could".to_string(),
-                       "Possibly".to_string(),
-                       "Go".to_string(),
-                       "Wrong".to_string()]
-        });
-        assert_eq!(sampled_data.len(), 1);
-    }*/
 
     /// Check that the sampler works well
     define_sampler_tests!{ super::Sampler }
