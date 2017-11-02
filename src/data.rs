@@ -18,9 +18,9 @@ pub(crate) trait SampledData {
 }
 
 
-/// Sampled data container for stuff coming out of an eager parser
-pub(crate) trait SampledDataEager : SampledData {
-    /// Eagerly parsed data has no lifetime parameter
+/// Sampled data container for data with no lifetime parameter (for example,
+/// data which is coming out of an eager parser)
+pub(crate) trait SampledData0 : SampledData {
     type Input;
 
     /// Construct container using a sample of parsed data for schema analysis
@@ -34,9 +34,9 @@ pub(crate) trait SampledDataEager : SampledData {
 /* TODO: Stabilize these parser traits once associated type constructors land
          in Stable Rust. As of writing (2017-10), they are not even implemented.
 
-/// Sampled data container for stuff coming out of an incremental parser
-pub(crate) trait SampledDataIncremental : SampledData {
-    /// Incrementally parsed data has the lifetime of the original file sample
+/// Sampled data container for data with one lifetime parameter (for example,
+/// data which is coming out of an incremental parser)
+pub(crate) trait SampledData1 : SampledData {
     type Input<'a>;
 
     /// Construct container using a sample of parsed data for schema analysis
@@ -47,10 +47,9 @@ pub(crate) trait SampledDataIncremental : SampledData {
 }
 
 
-/// Sampled data container for stuff coming out of a caching parser
-pub(crate) trait SampledDataCaching : SampledData {
-    /// Data from a caching parser has the lifetime of the original file sample
-    /// and the lifetime of the parser object itself (which is usually distinct)
+/// Sampled data container for data with two lifetime parameters (for example,
+/// data which is coming out of a caching parser)
+pub(crate) trait SampledData2 : SampledData {
     type Input<'a, 'b>;
 
     /// Construct container using a sample of parsed data for schema analysis
