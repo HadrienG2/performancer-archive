@@ -5,9 +5,10 @@
 //! allows monitoring their time evolution.
 //!
 //! This sampling interface always works in the same way: read the contents of
-//! the file and hand it to a parser which will extract and internally keep a
-//! set of measurements. As a consequence, it is possible to standardize the
-//! sampling abstraction, which is what this module does.
+//! the file and hand it to a parser which will extract and decode a set of
+//! measurements, that will in turn be fed to a container. As a consequence, it
+//! is possible to standardize the sampling abstraction, which is what this
+//! module does.
 
 
 /// Define the sampler struct associated with a certain pseudo-file parser
@@ -16,21 +17,24 @@
 /// and feed it into a certain parser's sample() method every time its sample()
 /// method is called. For example, the invocation...
 ///
-/// `define_sampler!(MemInfoSampler : "/proc/meminfo" => MemInfoData)`
+/// `define_sampler!(MemInfoSampler : "/proc/meminfo" => MemInfoParser
+///                                                   => MemInfoData)`
 ///
 /// ...defines a sampler called "MemInfoSampler" which loads data from the file
-/// /proc/meminfo and feeds it to a parser of type "MemInfoData".
+/// /proc/meminfo and feeds it to a parser of type "MemInfoParser", and then
+/// stores the parsed data into a container called "MemInfoData".
 ///
 /// In today's Rust, this job must be done via macros, because Rust does not yet
 /// support generics with value parameters. In future Rust, once this genericity
 /// feature has landed, the define_sampler macro will go away in favor of a
 /// simpler generic struct instantiation.
 ///
-/// For the time being, to avoid confusing macro instantiation errors, make sure
-/// that your parser struct properly implements the PseudoFileParser trait.
+/// You may want to check out the "parser" module to get an idea of what the
+/// parser's interface should be like, and the "data" module to get an idea of
+/// what the data container's interface should be like.
 ///
 macro_rules! define_sampler {
-    ($sampler:ident : $file_location:expr => $parser:ty) => {
+    ($sampler: ident : $file_location:expr => $parser:ty => $container:ty) => {
         // Hopefully the host won't need to import these...
         use ::reader::ProcFileReader;
         use std::io;
@@ -40,18 +44,31 @@ macro_rules! define_sampler {
             /// Reader object for $file_location
             reader: ProcFileReader,
 
-            /// Parser holding sampled data from $file_location
-            samples: $parser,
+            /// Streaming parser for $file_location
+            parser: $parser,
+
+            /// Samples of data extracted from $file_location
+            samples: $container
         }
         //
         impl $sampler {
             /// Create a new sampler for $file_location
             pub fn new() -> io::Result<Self> {
+                // Set up a sampling reader
                 let mut reader = ProcFileReader::open($file_location)?;
-                let samples = reader.sample(|initial| <$parser>::new(initial))?;
+
+                // Build parsing and storage infrastructure from a first sample
+                let (parser, samples) = reader.sample(|file| {
+                    let mut parser = <$parser>::new(file);
+                    let samples = <$container>::new(parser.parse(file));
+                    (parser, samples)
+                })?;
+
+                // Return the full sampling setup
                 Ok(
                     Self {
                         reader,
+                        parser,
                         samples,
                     }
                 )
@@ -59,31 +76,15 @@ macro_rules! define_sampler {
 
             /// Acquire a new sample of data from $file_location
             pub fn sample(&mut self) -> io::Result<()> {
+                let parser = &mut self.parser;
                 let samples = &mut self.samples;
-                self.reader.sample(|contents: &str| samples.push(contents))
+                self.reader.sample(|file| {
+                    let stream = parser.parse(file);
+                    samples.push(stream);
+                })
             }
         }
     };
-}
-
-
-/// Interface contract which must be met by a pseudo-file parser
-///
-/// Pseudo-file parsers which are passed to define_sampler! should implement the
-/// following trait, which guarantees a certain degree of interface homogeneity.
-///
-pub trait PseudoFileParser {
-    /// Setup a parser, using a first sample from the associated pseudo-file
-    /// (which will not be recorded) in order to analyze the file's structure.
-    fn new(initial_contents: &str) -> Self;
-
-    /// Parse and record a data sample from the pseudo-file
-    fn push(&mut self, file_contents: &str);
-
-    /// Indicate how many samples are present in the internal data store. In
-    /// debug mode, make sure that said data store is in a consistent state.
-    #[cfg(test)]
-    fn len(&self) -> usize;
 }
 
 
@@ -92,6 +93,7 @@ pub trait PseudoFileParser {
 /// This macro should be invoked inside of the module associated with the unit
 /// tests for a certain pseudo-file.
 ///
+#[cfg(test)]
 macro_rules! define_sampler_tests {
     ($sampler:ty) => {
         /// Check that sampler initialization works well
@@ -124,6 +126,7 @@ macro_rules! define_sampler_tests {
 /// The macro parameters are the sampler type, the path to the associated
 /// pseudo-file, and the number of benchmark iterations to be carried out.
 ///
+#[cfg(test)]
 macro_rules! define_sampler_benchs {
     ($sampler:ty, $file_location:expr, $bench_iters:expr) => {
         use ::reader::ProcFileReader;

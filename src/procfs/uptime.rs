@@ -1,16 +1,120 @@
 //! This module contains a sampling parser for /proc/uptime
 
-use ::procfs;
-use ::sampler::PseudoFileParser;
+use ::data::SampledData;
+use ::parser::PseudoFileParser;
+use std::str::SplitWhitespace;
 use std::time::Duration;
 
 
-// Implement a sampler for /proc/uptime using UptimeData for parsing & storage
-define_sampler!{ UptimeSampler : "/proc/uptime" => UptimeData }
+// Implement a sampler for /proc/uptime
+define_sampler!{ Sampler : "/proc/uptime" => Parser => Data }
+
+
+/// Incremental parser for /proc/uptime
+pub struct Parser {}
+//
+impl PseudoFileParser for Parser {
+    /// Build a parser, using an initial file sample. Here, this is used to
+    /// perform quick schema validation, just to maximize the odds that failure,
+    /// if any, will occur at initialization time rather than run time.
+    fn new(initial_contents: &str) -> Self {
+        let mut raw_fields = initial_contents.split_whitespace();
+        for _ in 0..2 {
+            let field = raw_fields.next().expect("Missing uptime or idle time");
+            FieldStream::parse_duration_secs(field);
+        }
+        debug_assert_eq!(raw_fields.next(), None, "Unsupported field detected");
+        Self {}
+    }
+}
+//
+// TODO: Implement IncrementalParser once that trait is usable in stable Rust
+impl Parser {
+    /// Begin to parse a pseudo-file sample, streaming its data out
+    fn parse<'a>(&mut self, file_contents: &'a str) -> FieldStream<'a> {
+        FieldStream::new(file_contents)
+    }
+}
+///
+///
+/// Stream of parsed data from /proc/uptime.
+///
+/// This iterator should successively yield...
+///
+/// * The machine uptime (wall clock time elapsed since boot)
+/// * The idle time (total CPU time spent in the idle state)
+/// * A None terminator
+///
+pub struct FieldStream<'a> {
+    /// Extracted columns from /proc/uptime
+    file_columns: SplitWhitespace<'a>,
+}
+//
+impl<'a> Iterator for FieldStream<'a> {
+    /// We output durations
+    type Item = Duration;
+
+    /// Parse the next duration from /proc/uptime
+    fn next(&mut self) -> Option<Self::Item> {
+        self.file_columns.next().map(Self::parse_duration_secs)
+    }
+}
+//
+impl<'a> FieldStream<'a> {
+    /// Specialized parser for Durations expressed in fractional seconds, using
+    /// the usual text format XXXX[.[YY]]. This is about standardized data, so
+    /// the input is assumed to be correct, and errors will result in panics.
+    ///
+    /// If this code turns out to be more generally useful, move it to a higher-
+    /// level module of the crate.
+    ///
+    fn parse_duration_secs(input: &str) -> Duration {
+        // Separate the integral part from the fractional part (if any)
+        let mut integer_iter = input.split('.');
+
+        // Parse the number of whole seconds
+        let seconds : u64
+            = integer_iter.next().expect("Input should not be empty")
+                          .parse().expect("Input should be a second counter");
+
+        // Parse the number of extra nanoseconds, if any
+        let nanoseconds = match integer_iter.next() {
+            // No decimals or a trailing decimal point means no nanoseconds.
+            Some("") | None => 0,
+
+            // If there is something after the ., assume it is decimals. Sub
+            // nanosecond decimals are unsupported and will be truncated.
+            Some(mut decimals) => {
+                debug_assert!(decimals.chars().all(|c| c.is_digit(10)),
+                              "Non-digit character detected inside decimals");
+                if decimals.len() > 9 { decimals = &decimals[0..9]; }
+                let nanosecs_factor = 10u32.pow(9 - (decimals.len() as u32));
+                let decimals_int =
+                    decimals.parse::<u32>()
+                            .expect("Failed to parse the fractional seconds");
+                decimals_int * nanosecs_factor
+            }
+        };
+
+        // At this point, we should be at the end of the string
+        debug_assert_eq!(integer_iter.next(), None,
+                         "Unexpected input at end of the duration string");
+
+        // Return the Duration that we just parsed
+        Duration::new(seconds, nanoseconds)
+    }
+
+    /// Set up a FieldStream for a certain sample of /proc/uptime
+    fn new(file_contents: &'a str) -> Self {
+        Self {
+            file_columns: file_contents.split_whitespace(),
+        }
+    }
+}
 
 
 /// Data samples from /proc/uptime, in structure-of-array layout
-struct UptimeData {
+pub struct Data {
     /// Elapsed wall clock time since the system was started
     wall_clock_uptime: Vec<Duration>,
 
@@ -18,44 +122,39 @@ struct UptimeData {
     cpu_idle_time: Vec<Duration>,
 }
 //
-impl PseudoFileParser for UptimeData {
+impl SampledData for Data {
+    /// Tell how many samples are present in the data store + check consistency
+    fn len(&self) -> usize {
+        let length = self.wall_clock_uptime.len();
+        debug_assert_eq!(length, self.cpu_idle_time.len());
+        length
+    }
+}
+//
+// TODO: Implement SampledDataIncremental once that is usable in stable Rust
+impl Data {
     /// Create a new uptime data store
-    fn new(initial_contents: &str) -> Self {
-        debug_assert_eq!(initial_contents.split_whitespace().count(), 2,
-                         "Unsupported entry found in /proc/uptime");
+    fn new(_stream: FieldStream) -> Self {
         Self {
             wall_clock_uptime: Vec::new(),
             cpu_idle_time: Vec::new(),
         }
     }
 
-    /// Parse a sample from /proc/uptime and add it to the internal data store
-    fn push(&mut self, file_contents: &str) {
-        // Load machine uptime and idle time
-        let mut numbers_iter = file_contents.split_whitespace();
+    /// Push a new stream of parsed data from /proc/uptime into the store
+    fn push(&mut self, mut stream: FieldStream) {
+        // Start parsing our input data sample
         self.wall_clock_uptime.push(
-            procfs::parse_duration_secs(
-                numbers_iter.next().expect("Machine uptime is missing")
-            )
+            stream.next().expect("Machine uptime is missing")
         );
         self.cpu_idle_time.push(
-            procfs::parse_duration_secs(
-                numbers_iter.next().expect("Machine idle time is missing")
-            )
+            stream.next().expect("Machine idle time is missing")
         );
 
         // If this debug assert fails, the contents of the file have been
-        // extended by a kernel revision, and the parser should be updated
-        debug_assert!(numbers_iter.next().is_none(),
-                      "Unsupported entry found in /proc/uptime");
-    }
-
-    /// Tell how many samples are present in the data store
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        let length = self.wall_clock_uptime.len();
-        debug_assert_eq!(length, self.cpu_idle_time.len());
-        length
+        // extended by a kernel revision, and the code should be updated
+        debug_assert_eq!(stream.next(), None,
+                         "Unsupported entry in /proc/uptime");
     }
 }
 
@@ -65,12 +164,49 @@ impl PseudoFileParser for UptimeData {
 mod tests {
     use std::thread;
     use std::time::Duration;
-    use super::{PseudoFileParser, UptimeData, UptimeSampler};
+    use super::{Data, FieldStream, Parser, PseudoFileParser, SampledData,
+                Sampler};
+
+    /// Check that our Duration parser works as expected
+    #[test]
+    fn parse_duration() {
+        // Plain seconds
+        assert_eq!(FieldStream::parse_duration_secs("42"),
+                   Duration::new(42, 0));
+
+        // Trailing decimal point
+        assert_eq!(FieldStream::parse_duration_secs("3."),
+                   Duration::new(3, 0));
+
+        // Some amounts of fractional seconds, down to nanosecond precision
+        assert_eq!(FieldStream::parse_duration_secs("4.2"),
+                   Duration::new(4, 200_000_000));
+        assert_eq!(FieldStream::parse_duration_secs("5.34"),
+                   Duration::new(5, 340_000_000));
+        assert_eq!(FieldStream::parse_duration_secs("6.567891234"),
+                   Duration::new(6, 567_891_234));
+
+        // Sub-nanosecond precision is truncated
+        assert_eq!(FieldStream::parse_duration_secs("7.8901234567"),
+                   Duration::new(7, 890_123_456));
+    }
+
+    /// Check that parsing uptime data works
+    #[test]
+    fn parse_data() {
+        let mut parser = Parser::new("10.11 12.13");
+        let mut stream = parser.parse("13.52  50.34");
+        assert_eq!(stream.next(), Some(Duration::new(13, 520_000_000)));
+        assert_eq!(stream.next(), Some(Duration::new(50, 340_000_000)));
+        assert_eq!(stream.next(), None);
+    }
 
     /// Check that creating an uptime data store works
     #[test]
-    fn init_uptime_data() {
-        let data = UptimeData::new("56.78 12.34");
+    fn init_container() {
+        let initial = "16.191963 19686.615";
+        let mut parser = Parser::new(initial);
+        let data = Data::new(parser.parse(initial));
         assert_eq!(data.wall_clock_uptime.len(), 0);
         assert_eq!(data.cpu_idle_time.len(), 0);
         assert_eq!(data.len(), 0);
@@ -78,25 +214,26 @@ mod tests {
 
     /// Check that parsing uptime data works
     #[test]
-    fn parse_uptime_data() {
-        let mut data = UptimeData::new("10.11 12.13");
-        data.push("13.52 50.34");
+    fn push_data() {
+        let initial = "145.16 16546.1469";
+        let mut parser = Parser::new(initial);
+        let mut data = Data::new(parser.parse(initial));
+        data.push(parser.parse("614.461  10645.163"));
         assert_eq!(data.wall_clock_uptime,
-                   vec![Duration::new(13, 520_000_000)]);
+                   vec![Duration::new(614, 461_000_000)]);
         assert_eq!(data.cpu_idle_time,
-                   vec![Duration::new(50, 340_000_000)]);
+                   vec![Duration::new(10645, 163_000_000)]);
         assert_eq!(data.len(), 1);
     }
 
     /// Check that the sampler works well
-    define_sampler_tests!{ UptimeSampler }
+    define_sampler_tests!{ Sampler }
 
     /// Check that the sampled uptime increases over time
     #[test]
     fn increasing_uptime() {
         // Create an uptime sampler
-        let mut uptime = UptimeSampler::new()
-                                       .expect("Failed to create a sampler");
+        let mut uptime = Sampler::new().expect("Failed to create a sampler");
 
         // Acquire a first sample
         uptime.sample().expect("Failed to sample uptime once");
@@ -122,7 +259,7 @@ mod tests {
 ///
 #[cfg(test)]
 mod benchmarks {
-    define_sampler_benchs!{ super::UptimeSampler,
+    define_sampler_benchs!{ super::Sampler,
                             "/proc/uptime",
                             3_000_000 }
 }
