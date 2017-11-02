@@ -4,23 +4,31 @@ mod cpu;
 mod interrupts;
 mod paging;
 
+use ::data::{SampledData, SampledData0};
 use ::parser::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use chrono::{DateTime, TimeZone, Utc};
-use std::fmt::Debug;
 use std::str::FromStr;
 
 
 // Implement a sampler for /proc/meminfo
-define_sampler!{ Sampler : "/proc/stat" => Parser => SampledData }
+define_sampler!{ Sampler : "/proc/stat" => Parser => Data }
 
 
 /// Incremental parser for /proc/stat
 pub struct Parser {}
 //
 impl PseudoFileParser for Parser {
-    /// Build a parser, using initial file contents for schema analysis
-    fn new(_initial_contents: &str) -> Self {
+    /// Build a parser, using an initial file sample. Here, this is used to
+    /// perform quick schema validation, just to maximize the odds that failure,
+    /// if any, will occur at initialization time rather than run time.
+    fn new(initial_contents: &str) -> Self {
+        let mut stream = RecordStream::new(initial_contents);
+        while let Some(record) = stream.next() {
+            if let RecordKind::Unsupported(header) = record.kind() {
+                debug_assert!(false, "Unsupported record header: {}", header);
+            }
+        }
         Self {}
     }
 }
@@ -362,12 +370,13 @@ pub enum RecordKind {
 /// INTERNAL: Helpful wrapper for pushing data into optional containers that we
 ///           actually know from additional metadata to be around.
 ///
-///           This macro used to be a generic method of SampledData, but at this
+///           This macro used to be a generic method of Data, but at this
 ///           point in time we have unfortunately out-smarted the Rust type
 ///           system. In a nutshell, the problem lies in the fact that
 ///           "record_fields" may or may not have lifetime parameters.
 ///
-///           Obviously, the container must have a compatible "push" method.
+///           Obviously, the container must have a compatible "push" method, in
+///           the spirit of the relevant SampledDataN trait.
 ///
 macro_rules! force_push {
     ($store:expr, $record_fields:expr) => {
@@ -386,25 +395,25 @@ macro_rules! force_push {
 /// considered optional at this point...
 ///
 #[derive(Clone, Debug, PartialEq)]
-struct SampledData {
+struct Data {
     /// Total CPU usage stats, aggregated across all hardware threads
-    all_cpus: Option<cpu::SampledData>,
+    all_cpus: Option<cpu::Data>,
 
     /// Per-CPU usage statistics, featuring one entry per hardware CPU thread
     ///
     /// An empty Vec here has the same meaning as a None in other entries: the
     /// per-thread breakdown of CPU usage was not provided by the kernel.
     ///
-    each_thread: Vec<cpu::SampledData>,
+    each_thread: Vec<cpu::Data>,
 
     /// Number of pages that the system paged in and out from disk, overall...
-    paging: Option<paging::SampledData>,
+    paging: Option<paging::Data>,
 
     /// ...and narrowing it down to swapping activity in particular
-    swapping: Option<paging::SampledData>,
+    swapping: Option<paging::Data>,
 
     /// Statistics on the number of hardware interrupts that were serviced
-    interrupts: Option<interrupts::SampledData>,
+    interrupts: Option<interrupts::Data>,
 
     // NOTE: Linux 2.4 used to have disk_io statistics in /proc/stat as well,
     //       but since that is incredibly ancient, we propose not to support it.
@@ -427,7 +436,7 @@ struct SampledData {
     /// Statistics on the number of softirqs that were serviced. These use the
     /// same layout as hardware interrupt stats, where softirqs are enumerated
     /// in the same order as in /proc/softirq.
-    softirqs: Option<interrupts::SampledData>,
+    softirqs: Option<interrupts::Data>,
 
     /// INTERNAL: This vector indicates how each line of /proc/stat maps to the
     /// members of this struct. It basically is a legal and move-friendly
@@ -441,7 +450,33 @@ struct SampledData {
     line_target: Vec<RecordKind>,
 }
 //
-impl SampledData {
+impl SampledData for Data {
+    /// Tell how many samples are present in the data store + check consistency
+    fn len(&self) -> usize {
+        let mut opt_len = None;
+        Self::update_len(&mut opt_len, &self.all_cpus);
+        debug_assert!(
+            self.each_thread
+                .iter()
+                .all(|cpu| {
+                    opt_len.expect("each_thread should come with all_cpus") ==
+                        cpu.len()
+                })
+        );
+        Self::update_len(&mut opt_len, &self.paging);
+        Self::update_len(&mut opt_len, &self.swapping);
+        Self::update_len(&mut opt_len, &self.interrupts);
+        Self::update_len(&mut opt_len, &self.context_switches);
+        Self::update_len(&mut opt_len, &self.process_forks);
+        Self::update_len(&mut opt_len, &self.runnable_processes);
+        Self::update_len(&mut opt_len, &self.blocked_processes);
+        Self::update_len(&mut opt_len, &self.softirqs);
+        opt_len.unwrap_or(0)
+    }
+}
+//
+// TODO: Implement SampledData1 once that is usable in stable Rust
+impl Data {
     /// Create a new statistical data store, using a first sample to know the
     /// structure of /proc/stat on this system
     fn new(mut stream: RecordStream) -> Self {
@@ -469,7 +504,7 @@ impl SampledData {
                 // Statistics on all CPUs
                 RecordKind::CPUTotal => {
                     data.all_cpus = Some(
-                        cpu::SampledData::new(record.parse_cpu())
+                        cpu::Data::new(record.parse_cpu())
                     );
                 }
 
@@ -479,28 +514,28 @@ impl SampledData {
                     assert_eq!(thread_id, data.each_thread.len() as u16,
                                "Unexpected CPU thread ordering");
                     data.each_thread.push(
-                        cpu::SampledData::new(record.parse_cpu())
+                        cpu::Data::new(record.parse_cpu())
                     );
                 },
 
                 // Paging statistics
                 RecordKind::PagingTotal => {
                     data.paging = Some(
-                        paging::SampledData::new(record.parse_paging())
+                        paging::Data::new(record.parse_paging())
                     );
                 },
 
                 // Swapping statistics
                 RecordKind::PagingSwap => {
                     data.swapping = Some(
-                        paging::SampledData::new(record.parse_paging())
+                        paging::Data::new(record.parse_paging())
                     );
                 },
 
                 // Hardware interrupt statistics
                 RecordKind::InterruptsHW => {
                     data.interrupts = Some(
-                        interrupts::SampledData::new(record.parse_interrupts())
+                        interrupts::Data::new(record.parse_interrupts())
                     );
                 },
 
@@ -532,16 +567,12 @@ impl SampledData {
                 // Softirq statistics
                 RecordKind::InterruptsSW => {
                     data.softirqs = Some(
-                        interrupts::SampledData::new(record.parse_interrupts())
+                        interrupts::Data::new(record.parse_interrupts())
                     );
                 },
 
                 // Something we do not support yet? We should!
-                RecordKind::Unsupported(ref unknown_header) => {
-                    debug_assert!(false,
-                                  "Unsupported entry '{}' detected!",
-                                  unknown_header);
-                }
+                RecordKind::Unsupported(_) => {}
             }
 
             // Remember what kind of record that was
@@ -607,8 +638,8 @@ impl SampledData {
                 },
                 RecordKind::InterruptsSW => {
                     force_push!(self.softirqs, record.parse_interrupts());
-                }
-                RecordKind::Unsupported(_) => {},
+                },
+                RecordKind::Unsupported(_) => {}
             }
         }
 
@@ -619,36 +650,10 @@ impl SampledData {
                       "Found a bug in CPU thread iteration");
     }
 
-    /// Tell how many samples are present in the data store, and in debug mode
-    /// check for internal data store consistency
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        let mut opt_len = None;
-        Self::update_len(&mut opt_len, &self.all_cpus);
-        debug_assert!(
-            self.each_thread
-                .iter()
-                .all(|cpu| {
-                    opt_len.expect("each_thread should come with all_cpus") ==
-                        cpu.len()
-                })
-        );
-        Self::update_len(&mut opt_len, &self.paging);
-        Self::update_len(&mut opt_len, &self.swapping);
-        Self::update_len(&mut opt_len, &self.interrupts);
-        Self::update_len(&mut opt_len, &self.context_switches);
-        Self::update_len(&mut opt_len, &self.process_forks);
-        Self::update_len(&mut opt_len, &self.runnable_processes);
-        Self::update_len(&mut opt_len, &self.blocked_processes);
-        Self::update_len(&mut opt_len, &self.softirqs);
-        opt_len.unwrap_or(0)
-    }
-
     /// INTERNAL: Update our prior knowledge of the amount of stored samples
     ///           (current_len) according to an optional data source.
-    #[cfg(test)]
     fn update_len<T>(current_len: &mut Option<usize>, opt_store: &Option<T>)
-        where T: StatDataStore
+        where T: SampledData
     {
         // This closure will get us the amount of samples stored inside of the
         // optional data source as an Option<usize>, if we turn out to need it
@@ -672,36 +677,27 @@ impl SampledData {
 }
 
 
-/// Every container of /proc/stat data should implement the following trait,
-/// which exposes its ability to be filled from segmented /proc/stat contents.
-trait StatDataStore {
-    // The force_push! macro will assume that a container has a "push" method,
-    // which behaves as if the StatDataStore trait had the following members,
-    // and these members were valid Rust syntax.
-    //
-    //    /// Record field parser or pre-parsed record fields. May or may not
-    //    /// have lifetime parameters, it does not really matter in this case.
-    //    /// This is the notion that I can't express using Rust traits.
-    //    type RecordFields<'...>;
-    //    
-    //    /// Parse and record a sample of data from /proc/stat
-    //    fn push(&mut self, fields: Self::RecordFields);
-
-    /// Number of data samples that were recorded so far
-    #[cfg(test)]
-    fn len(&self) -> usize;
-}
-
-
-/// We implement this trait for primitive types that can be parsed from &str
-impl<T, U> StatDataStore for Vec<T>
-    where T: FromStr<Err=U>,
-          U: Debug
+/// Every sub-store of sampled data inside of Data should implement SampledData,
+/// including the trusty old Vec (which is a case of SampledDataEager).
+impl<T> SampledData for Vec<T>
+    where T: FromStr
 {
-    #[cfg(test)]
+    /// Tell how many data samples are present in this container
     fn len(&self) -> usize {
         <Vec<T>>::len(self)
     }
+}
+//
+impl<T> SampledData0 for Vec<T>
+    where T: FromStr
+{
+    type Input = T;
+
+    /// Construct container using a sample of parsed data for schema analysis
+    fn new(_sample: Self::Input) -> Self { <Vec<T>>::new() }
+
+    /// Push a sample of parsed data into the container
+    fn push(&mut self, sample: Self::Input) { <Vec<T>>::push(self, sample); }
 }
 
 
@@ -711,8 +707,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use ::splitter::split_line_and_run;
     use super::{cpu, interrupts, paging};
-    use super::{Parser, PseudoFileParser, Record, RecordKind, RecordStream,
-                SampledData};
+    use super::{Data, Parser, PseudoFileParser, Record, RecordKind,
+                RecordStream, SampledData};
 
     /// Check that CPU stats are parsed properly
     #[test]
@@ -846,7 +842,6 @@ mod tests {
                             "cpu0 7 5 3 1",
                             "cpu1 2 3 4 5",
                             "page 666 999",
-                            "silly_silly 2924",
                             "swap 333 888",
                             "intr 128 0 3 4 5",
                             "ctxt 6461165",
@@ -863,7 +858,6 @@ mod tests {
                              "cpu0 17 22 38 91",
                              "cpu1 7 26 34 5",
                              "page 888 1010",
-                             "silly_silly 3035",
                              "swap 666 987",
                              "intr 129 0 3 4 5",
                              "ctxt 8461188",
@@ -882,17 +876,17 @@ mod tests {
     #[test]
     fn sampled_data() {
         // First, let's define some shortcuts...
-        type CpuData = cpu::SampledData;
-        type PagingData = paging::SampledData;
-        type InterruptsData = interrupts::SampledData;
+        type CpuData = cpu::Data;
+        type PagingData = paging::Data;
+        type InterruptsData = interrupts::Data;
 
         // Build a new data container associated with certain file contents. If
         // the push flag is set, also push the same file contents into it so as
         // to create a basic mock data sample.
         let new_sampled_data =
-            |file_contents: &str, push: bool| -> SampledData
+            |file_contents: &str, push: bool| -> Data
         {
-            let mut data = SampledData::new(RecordStream::new(file_contents));
+            let mut data = Data::new(RecordStream::new(file_contents));
             if push {
                 data.push(RecordStream::new(file_contents));
             }
@@ -952,18 +946,18 @@ mod tests {
         // good base case which we can build other sampled data tests upon.
         let mut stats = String::new();
         let empty_void_stats = new_sampled_data(&stats, false);
-        let mut expected_empty = SampledData { all_cpus: None,
-                                               each_thread: Vec::new(),
-                                               paging: None,
-                                               swapping: None,
-                                               interrupts: None,
-                                               context_switches: None,
-                                               boot_time: None,
-                                               process_forks: None,
-                                               runnable_processes: None,
-                                               blocked_processes: None,
-                                               softirqs: None,
-                                               line_target: Vec::new() };
+        let mut expected_empty = Data { all_cpus: None,
+                                        each_thread: Vec::new(),
+                                        paging: None,
+                                        swapping: None,
+                                        interrupts: None,
+                                        context_switches: None,
+                                        boot_time: None,
+                                        process_forks: None,
+                                        runnable_processes: None,
+                                        blocked_processes: None,
+                                        softirqs: None,
+                                        line_target: Vec::new() };
         assert_eq!(empty_void_stats, expected_empty);
         let full_void_stats = new_sampled_data(&stats, true);
         let mut expected_full = expected_empty.clone();
@@ -972,7 +966,7 @@ mod tests {
         // We will then test supported records one by one, in the following way
         let mut check_new_record =
             |extra_text: &str,
-             update_expected: &Fn(&mut SampledData, bool)|
+             update_expected: &Fn(&mut Data, bool)|
          {
             // Add new record(s) to our mock file sample
             stats.push_str(extra_text);

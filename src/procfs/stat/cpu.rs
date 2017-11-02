@@ -1,10 +1,10 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the "cpu" sections of /proc/stat.
 
+use ::data::SampledData;
 use ::splitter::SplitColumns;
 use libc;
 use std::time::Duration;
-use super::StatDataStore;
 
 
 /// CPU statistics record from /proc/stat
@@ -83,7 +83,7 @@ lazy_static! {
 
 /// The amount of CPU time that the system spent in various states
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct SampledData {
+pub(super) struct Data {
     /// Time spent in user mode
     user_time: Vec<Duration>,
 
@@ -117,7 +117,33 @@ pub(super) struct SampledData {
     guest_nice_time: Option<Vec<Duration>>,
 }
 //
-impl SampledData {
+impl SampledData for Data {
+    /// Tell how many samples are present in the data store + check consistency
+    fn len(&self) -> usize {
+        // Check the mandatory CPU timers
+        let length = self.user_time.len();
+        debug_assert_eq!(length, self.nice_time.len());
+        debug_assert_eq!(length, self.system_time.len());
+        debug_assert_eq!(length, self.idle_time.len());
+
+        // Check the length of the optional CPU timers for consistency
+        let optional_len = |op: &Option<Vec<Duration>>| -> usize {
+            op.as_ref().map_or(length, |vec| vec.len())
+        };
+        debug_assert_eq!(length, optional_len(&self.io_wait_time));
+        debug_assert_eq!(length, optional_len(&self.irq_time));
+        debug_assert_eq!(length, optional_len(&self.softirq_time));
+        debug_assert_eq!(length, optional_len(&self.stolen_time));
+        debug_assert_eq!(length, optional_len(&self.guest_time));
+        debug_assert_eq!(length, optional_len(&self.guest_nice_time));
+
+        // Return the overall length
+        length
+    }
+}
+//
+// TODO: Implement SampledData2 once that is usable in stable Rust
+impl Data {
     /// Create new CPU statistics
     pub fn new(fields: RecordFields) -> Self {
         // Check if we know about all CPU timers
@@ -183,32 +209,6 @@ impl SampledData {
                       "A CPU timer appeared out of nowhere");
     }
 }
-//
-impl StatDataStore for SampledData {
-    /// Tell how many samples are present in the data store
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        // Check the mandatory CPU timers
-        let length = self.user_time.len();
-        debug_assert_eq!(length, self.nice_time.len());
-        debug_assert_eq!(length, self.system_time.len());
-        debug_assert_eq!(length, self.idle_time.len());
-
-        // Check the length of the optional CPU timers for consistency
-        let optional_len = |op: &Option<Vec<Duration>>| -> usize {
-            op.as_ref().map_or(length, |vec| vec.len())
-        };
-        debug_assert_eq!(length, optional_len(&self.io_wait_time));
-        debug_assert_eq!(length, optional_len(&self.irq_time));
-        debug_assert_eq!(length, optional_len(&self.softirq_time));
-        debug_assert_eq!(length, optional_len(&self.stolen_time));
-        debug_assert_eq!(length, optional_len(&self.guest_time));
-        debug_assert_eq!(length, optional_len(&self.guest_nice_time));
-
-        // Return the overall length
-        length
-    }
-}
 
 
 /// Unit tests
@@ -216,7 +216,7 @@ impl StatDataStore for SampledData {
 mod tests {
     use std::time::Duration;
     use ::splitter::split_line_and_run;
-    use super::{RecordFields, SampledData, StatDataStore, NANOSECS_PER_TICK};
+    use super::{Data, RecordFields, SampledData, NANOSECS_PER_TICK};
 
     /// Test the parsing of valid CPU stats
     #[test]
@@ -266,7 +266,7 @@ mod tests {
         let tick_duration = *TICK_DURATION;
 
         // Check that building a container for the oldest stats format works
-        let mut data = with_record_fields("94 6316 64 2", SampledData::new);
+        let mut data = with_record_fields("94 6316 64 2", Data::new);
         assert_eq!(data.user_time,          Vec::new());
         assert_eq!(data.nice_time,          Vec::new());
         assert_eq!(data.system_time,        Vec::new());
@@ -301,7 +301,7 @@ mod tests {
         let tick_duration = *TICK_DURATION;
 
         // Check that building a container for the extended stats format works
-        let mut data = with_record_fields("66 321 795 12 32", SampledData::new);
+        let mut data = with_record_fields("66 321 795 12 32", Data::new);
         assert_eq!(data.user_time,          Vec::new());
         assert_eq!(data.nice_time,          Vec::new());
         assert_eq!(data.system_time,        Vec::new());
@@ -337,7 +337,7 @@ mod tests {
 
         // Check that building a container for the extended stats format works
         let mut data = with_record_fields("31 854 361 32 6 8 21 9 3 2",
-                                          SampledData::new);
+                                          Data::new);
         assert_eq!(data.user_time,          Vec::new());
         assert_eq!(data.nice_time,          Vec::new());
         assert_eq!(data.system_time,        Vec::new());

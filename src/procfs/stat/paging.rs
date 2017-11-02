@@ -1,8 +1,8 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the paging statistics of /proc/stat (page and swap).
 
-use splitter::SplitColumns;
-use super::StatDataStore;
+use ::data::SampledData;
+use ::splitter::SplitColumns;
 
 
 /// Paging statistics record from /proc/stat
@@ -45,7 +45,7 @@ impl RecordFields {
 
 /// Storage paging ativity statistics
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct SampledData {
+pub(super) struct Data {
     /// Number of RAM pages that were paged in from disk
     incoming: Vec<u64>,
 
@@ -53,7 +53,17 @@ pub(super) struct SampledData {
     outgoing: Vec<u64>,
 }
 //
-impl SampledData {
+impl SampledData for Data {
+    // Tell how many samples are present in the data store + check consistency
+    fn len(&self) -> usize {
+        let length = self.incoming.len();
+        debug_assert_eq!(length, self.outgoing.len());
+        length
+    }
+}
+//
+// TODO: Implement SampledData2 once that is usable in stable Rust
+impl Data {
     /// Create new paging statistics
     pub fn new(_fields: RecordFields) -> Self {
         Self {
@@ -68,23 +78,13 @@ impl SampledData {
         self.outgoing.push(fields.outgoing);
     }
 }
-//
-impl StatDataStore for SampledData {
-    /// Tell how many samples are present in the data store
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        let length = self.incoming.len();
-        debug_assert_eq!(length, self.outgoing.len());
-        length
-    }
-}
 
 
 /// Unit tests
 #[cfg(test)]
 mod tests {
     use ::splitter::split_line_and_run;
-    use super::{RecordFields, SampledData, StatDataStore};
+    use super::{Data, RecordFields, SampledData};
 
     /// Check that paging statistics parsing works as expected
     #[test]
@@ -99,7 +99,7 @@ mod tests {
     #[test]
     fn sampled_data() {
         // The initial state should be right
-        let mut data = with_record_fields("4 312", SampledData::new);
+        let mut data = with_record_fields("4 312", Data::new);
         assert_eq!(data.incoming, Vec::new());
         assert_eq!(data.outgoing, Vec::new());
         assert_eq!(data.len(),    0);

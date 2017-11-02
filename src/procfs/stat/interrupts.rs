@@ -1,8 +1,8 @@
 //! This module contains facilities for parsing and storing the data contained
 //! in the IRQ statistics of /proc/stat (intr and softirq).
 
+use ::data::SampledData;
 use ::splitter::SplitColumns;
-use super::StatDataStore;
 
 
 /// Interrupt statistics record from /proc/stat
@@ -54,7 +54,7 @@ impl<'a, 'b> Iterator for DetailsIter<'a, 'b> {
 
 /// Interrupt statistics from /proc/stat, in structure-of-array layout
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct SampledData {
+pub(super) struct Data {
     /// Total number of interrupts that were serviced. May be higher than the
     /// sum of the breakdown below if there are unnumbered interrupt sources.
     total: Vec<u64>,
@@ -63,7 +63,17 @@ pub(super) struct SampledData {
     details: Vec<SampledCounter>
 }
 //
-impl SampledData {
+impl SampledData for Data {
+    // Tell how many samples are present in the data store + check consistency
+    fn len(&self) -> usize {
+        let length = self.total.len();
+        debug_assert!(self.details.iter().all(|vec| vec.len() == length));
+        length
+    }
+}
+//
+// TODO: Implement SampledData2 once that is usable in stable Rust
+impl Data {
     /// Create new interrupt statistics, given the amount of interrupt sources
     pub fn new(fields: RecordFields) -> Self {
         Self {
@@ -87,16 +97,6 @@ impl SampledData {
         // At this point, we should have loaded all available stats
         debug_assert!(details_iter.next().is_none(),
                       "An IRQ counter appeared out of nowhere");
-    }
-}
-//
-impl StatDataStore for SampledData {
-    // Tell how many samples are present in the data store
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        let length = self.total.len();
-        debug_assert!(self.details.iter().all(|vec| vec.len() == length));
-        length
     }
 }
 ///
@@ -146,7 +146,6 @@ impl SampledCounter {
     }
 
     /// Tell how many interrupt counts we have recorded so far
-    #[cfg(test)]
     fn len(&self) -> usize {
         match *self {
             SampledCounter::Zeroes(zero_count) => zero_count,
@@ -160,8 +159,7 @@ impl SampledCounter {
 #[cfg(test)]
 mod tests {
     use ::splitter::split_line_and_run;
-    use super::{DetailsIter, RecordFields, SampledCounter, SampledData,
-                StatDataStore};
+    use super::{Data, DetailsIter, RecordFields, SampledCounter, SampledData};
 
     /// Check that the detailed interrupt count parser works, and that its
     /// optimization for zero interrupt counts does not mess things up
@@ -228,7 +226,7 @@ mod tests {
     #[test]
     fn sampled_data() {
         // Check that initialization works
-        let mut data = with_record_fields("666 0 24", SampledData::new);
+        let mut data = with_record_fields("666 0 24", Data::new);
         assert_eq!(data.total, Vec::new());
         assert_eq!(data.details.len(), 2);
         assert_eq!(data.len(), 0);
