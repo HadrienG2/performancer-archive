@@ -29,8 +29,9 @@
 /// feature has landed, the define_sampler macro will go away in favor of a
 /// simpler generic struct instantiation.
 ///
-/// For the time being, to avoid confusing macro instantiation errors, make sure
-/// that your parser struct properly implements the PseudoFileParser trait.
+/// You may want to check out the "parser" module to get an idea of what the
+/// parser's interface should be like, and the "data" module to get an idea of
+/// what the data container's interface should be like.
 ///
 macro_rules! define_sampler {
     ($sampler: ident : $file_location:expr => $parser:ty => $container:ty) => {
@@ -84,26 +85,6 @@ macro_rules! define_sampler {
             }
         }
     };
-}
-
-
-/// Interface contract which must be met by a pseudo-file parser
-///
-/// Pseudo-file parsers which are passed to define_sampler! should implement the
-/// following trait, which guarantees a certain degree of interface homogeneity.
-///
-pub trait PseudoFileParser {
-    /// Setup a parser, using a first sample from the associated pseudo-file
-    /// (which will not be recorded) in order to analyze the file's structure.
-    fn new(initial_contents: &str) -> Self;
-
-    /// Parse and record a data sample from the pseudo-file
-    fn push(&mut self, file_contents: &str);
-
-    /// Indicate how many samples are present in the internal data store. In
-    /// debug mode, make sure that said data store is in a consistent state.
-    #[cfg(test)]
-    fn len(&self) -> usize;
 }
 
 
