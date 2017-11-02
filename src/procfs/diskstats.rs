@@ -9,6 +9,93 @@ use std::time::Duration;
 /* define_sampler!{ Sampler : "/proc/diskstats" => Parser => Data } */
 
 
+/// Stream of records from /proc/diskstats
+///
+/// This streaming iterator should yield a stream of disk stats records, each
+/// representing a line of /proc/diskstats (i.e. statistics on a block device).
+///
+pub struct RecordStream<'a> {
+    /// Iterator into the lines and columns of /proc/diskstats
+    file_lines: SplitLinesBySpace<'a>,
+}
+//
+impl<'a> RecordStream<'a> {
+    /// Parse the next record from /proc/diskstats into a stream of fields
+    pub fn next<'b>(&'b mut self) -> Option<Record<'a, 'b>>
+        where 'a: 'b
+    {
+        self.file_lines.next().map(Record::new)
+    }
+
+    /// Create a record stream from raw contents
+    fn new(file_contents: &'a str) -> Self {
+        Self {
+            file_lines: SplitLinesBySpace::new(file_contents),
+        }
+    }
+}
+///
+///
+/// Record from /proc/diskstats (activity of one block device)
+pub struct Record<'a, 'b> where 'a: 'b {
+    // Device numbers
+    device_nums: DeviceNumbers,
+
+    // Device name
+    device_str: &'a str,
+
+    // Unparsed device statistics
+    stats_columns: SplitColumns<'a, 'b>,
+}
+//
+impl<'a, 'b> Record<'a, 'b> {
+    /// Query the device number
+    fn device_numbers(&self) -> DeviceNumbers {
+        self.device_nums
+    }
+
+    /// Query the device name
+    fn device_name(&self) -> &str {
+        self.device_str
+    }
+
+    // TODO: Query the statistics
+
+    /// Construct a record from associated file columns
+    fn new(mut columns: SplitColumns<'a, 'b>) -> Self {
+        let major_num = columns.next().expect("Expected major device number")
+                               .parse().expect("Could not parse major number");
+        let minor_num = columns.next().expect("Expected minor device number")
+                               .parse().expect("Could not parse minor number");
+        let name = columns.next().expect("Expected device name");
+        Self {
+            device_nums: DeviceNumbers { major: major_num, minor: minor_num },
+            device_str: name,
+            stats_columns: columns,
+        }
+    }
+}
+///
+///
+/// Device identifier based on major and minor device numbers
+///
+/// This maps to the dev_t type from the Linux kernel, but it uses 64 bits
+/// instead of 32 bits in order to maximize the odds that this library will
+/// still work under future kernel versions.
+///
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct DeviceNumbers {
+    // Major device number, usually (but not always) maps to a kernel driver
+    pub major: u32,
+
+    // Minor device number, arbitrarily attributed by drivers to devices
+    pub minor: u32,
+}
+
+
+// TODO: Rework storage as a dumb slave of the smart parser
+
+
 /// Data samples from /proc/diskstats, in structure-of-array layout
 ///
 /// TODO: Provide a more detailed description after implementation
@@ -126,7 +213,7 @@ impl DiskStatsData {
                           .expect("Device name is missing");
 
         // Return all these informations
-        (DeviceNumbers::new(major, minor), name)
+        (DeviceNumbers { major, minor }, name)
     }
 }
 
@@ -231,32 +318,6 @@ impl DiskStatsRecord {
     fn len(&self) -> usize {
         // TODO
         unimplemented!()
-    }
-}
-
-
-/// Device identifier based on major and minor device numbers
-///
-/// This maps to the dev_t type from the Linux kernel, but it uses 64 bits
-/// instead of 32 bits in order to maximize the odds that this library will
-/// still work under future kernel versions.
-///
-#[derive(Debug, Eq, Hash, PartialEq)]
-struct DeviceNumbers {
-    // Major device number, usually (but not always) maps to a kernel driver
-    major: u32,
-
-    // Minor device number, arbitrarily attributed by drivers to devices
-    minor: u32,
-}
-//
-impl DeviceNumbers {
-    /// Create a new device number from a (major, minor) device id pair
-    fn new(major: u32, minor: u32) -> Self {
-        Self {
-            major,
-            minor,
-        }
     }
 }
 
