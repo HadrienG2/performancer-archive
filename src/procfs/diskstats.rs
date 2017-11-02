@@ -1,13 +1,12 @@
 ///! This module contains a sampling parser for /proc/diskstats
 
 use ::procfs::version::LINUX_VERSION;
-use ::sampler::PseudoFileParser;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use std::time::Duration;
 
 
 // Implement a /proc/diskstats sampler using DiskStatsData for parsing & storage
-define_sampler!{ DiskStatsSampler : "/proc/diskstats" => DiskStatsData }
+/* define_sampler!{ Sampler : "/proc/diskstats" => Parser => Data } */
 
 
 /// Data samples from /proc/diskstats, in structure-of-array layout
@@ -25,7 +24,7 @@ struct DiskStatsData {
     device_names: Vec<String>,
 }
 //
-impl PseudoFileParser for DiskStatsData {
+impl DiskStatsData {
     /// Create a new disk stats data store, using a first sample to know the
     /// structure of /proc/diskstats on this system
     fn new(initial_contents: &str) -> Self {
