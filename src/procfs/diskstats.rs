@@ -1,5 +1,6 @@
 ///! This module contains a sampling parser for /proc/diskstats
 
+use ::parser::PseudoFileParser;
 use ::procfs::version::LINUX_VERSION;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
 use std::time::Duration;
@@ -9,6 +10,27 @@ use std::time::Duration;
 /* define_sampler!{ Sampler : "/proc/diskstats" => Parser => Data } */
 
 
+/// Incremental parser for /proc/diskstats
+#[derive(Debug, PartialEq)]
+pub struct Parser {}
+//
+impl PseudoFileParser for Parser {
+    /// Build a parser, using an initial file sample.
+    fn new(initial_contents: &str) -> Self {
+        // TODO: Perform initial schema validation, caching
+        Self {}
+    }
+}
+//
+// TODO: Implement IncrementalParser once that trait is usable in stable Rust
+impl Parser {
+    /// Parse a pseudo-file sample into a stream of records
+    pub fn parse<'a>(&mut self, file_contents: &'a str) -> RecordStream<'a> {
+        RecordStream::new(file_contents)
+    }
+}
+///
+///
 /// Stream of records from /proc/diskstats
 ///
 /// This streaming iterator should yield a stream of disk stats records, each
