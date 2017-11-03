@@ -113,6 +113,89 @@ struct DeviceNumbers {
     // Minor device number, arbitrarily attributed by drivers to devices
     pub minor: u32,
 }
+///
+///
+/// Statistics for a given device
+/// TODO: Once the basic thing works, try to make it faster by making it lazier.
+struct Statistics {
+    /// Total number of reads that completed successfully
+    completed_reads: u64,
+
+    /// Total number of adjacent reads that were merged by the kernel
+    merged_reads: u64,
+
+    /// Total number of drive sectors that were successfully read
+    sector_reads: u64,
+
+    /// Total time spent reading data, as measured by summing the difference
+    /// between the end and start time of all reads.
+    ///
+    /// **WARNING**
+    ///
+    /// Use a lot of care when interpreting this statistic. It is easy to
+    /// misunderstand it for something that it is not:
+    ///
+    /// - The clock starts when reads are queued in the Linux kernel, not
+    ///   when they are actually processed. This is thus an indicator of how
+    ///   long all threads cumulatively blocked for IO, rather than of how
+    ///   much time the underlying hardware spent at servicing IO requests.
+    /// - Such an indicator can be quite meaningless in applications with
+    ///   optimized IO patterns which rely on asynchronous APIs or dedicated
+    ///   IO threads to avoid wasting CPU time during IO requests.
+    ///
+    total_read_time: Duration,
+
+    /// Total number of writes that completed successfully
+    completed_writes: u64,
+
+    /// Total number of adjacent writes that were merged by the kernel
+    merged_writes: u64,
+
+    /// Total number of drive sectors that were successfully written
+    sector_writes: u64,
+
+    /// Total time spent writing data, as measured by summing the difference
+    /// between the end and start time of all writes.
+    ///
+    /// The warning given about total_read_time also applies here.
+    ///
+    total_write_time: Duration,
+
+    /// Number of IO operations that are in progress (queued or running)
+    io_in_progress: usize,
+
+    /// Total wall clock time spent performing IO
+    ///
+    /// This a measure of the wall clock time during which a nonzero amount
+    /// of IO tasks were in progress (per the indicator above). This maps
+    /// quite well to the time spent by the underlying hardware on IO...
+    /// given the caveat that the kernel could delay the submission of
+    /// queued IO requests for power management or throughput reasons.
+    ///
+    wall_clock_io_time: Duration,
+
+    /// Weighted time spent performing IO
+    ///
+    /// On every update (which happens on various IO events), this timer is
+    /// incremented by the time spent doing IO since the last update (per
+    /// the wall_clock_io_time counter) times the amount of outstanding IO
+    /// requests. This can be an indicator of IO pressure in the kernel.
+    ///
+    weighted_io_time: Duration,
+}
+//
+impl Statistics {
+    // TODO: Add one accessor per statistic
+
+    /// Parse device statistics
+    fn new<'a, 'b>(mut columns: SplitColumns<'a, 'b>) -> Self {
+        // TODO: Parse the statistics. The raw data from the kernel is basically
+        //       a bunch of usizes, but there is some overflow analysis to be
+        //       done with respect to the previously observed result in order
+        //       to interprete correctly. Cache previous result in parser.
+        unimplemented!()
+    }
+}
 
 
 // TODO: Rework storage as a dumb slave of the smart parser
