@@ -3,6 +3,7 @@
 use ::parser::PseudoFileParser;
 use ::procfs::version::LINUX_VERSION;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
+use std::collections::HashMap;
 use std::time::Duration;
 
 
@@ -12,21 +13,37 @@ use std::time::Duration;
 
 /// Incremental parser for /proc/diskstats
 #[derive(Debug, PartialEq)]
-pub struct Parser {}
+pub struct Parser {
+    // Record of previously observed counter values on each device, used for
+    // handling of counter overflows on 32-bit platforms.
+    previous_counter_vals: HashMap<DeviceNumbers, [u64; 10]>,
+}
 //
 impl PseudoFileParser for Parser {
-    /// Build a parser, using an initial file sample.
+    /// Build a parser, using an initial file sample. Here, this is used to
+    /// perform quick schema validation, just to maximize the odds that failure,
+    /// if any, will occur at initialization time rather than run time.
     fn new(initial_contents: &str) -> Self {
-        // TODO: Perform initial schema validation, caching
-        Self {}
+        let mut parser = Self { previous_counter_vals: HashMap::new() };
+        {
+            let mut records = parser.parse(initial_contents);
+            while let Some(record) = records.next() {
+                let _ = record.device_numbers();
+                let _ = record.device_name();
+                let _ = record.extract_statistics();
+            }
+        }
+        parser
     }
 }
 //
-// TODO: Implement IncrementalParser once that trait is usable in stable Rust
+// TODO: Implement CachingParser once that trait is usable in stable Rust
 impl Parser {
     /// Parse a pseudo-file sample into a stream of records
-    pub fn parse<'a>(&mut self, file_contents: &'a str) -> RecordStream<'a> {
-        RecordStream::new(file_contents)
+    pub fn parse<'a, 'b>(&'a mut self,
+                         file_contents: &'b str) -> RecordStream<'a, 'b>
+    {
+        RecordStream::new(self, file_contents)
     }
 }
 ///
@@ -36,22 +53,27 @@ impl Parser {
 /// This streaming iterator should yield a stream of disk stats records, each
 /// representing a line of /proc/diskstats (i.e. statistics on a block device).
 ///
-pub struct RecordStream<'a> {
+pub struct RecordStream<'a, 'b> {
+    /// Parent parser struct
+    parser: &'a mut Parser,
+
     /// Iterator into the lines and columns of /proc/diskstats
-    file_lines: SplitLinesBySpace<'a>,
+    file_lines: SplitLinesBySpace<'b>,
 }
 //
-impl<'a> RecordStream<'a> {
+impl<'a, 'b> RecordStream<'a, 'b> {
     /// Parse the next record from /proc/diskstats into a stream of fields
-    pub fn next<'b>(&'b mut self) -> Option<Record<'a, 'b>>
-        where 'a: 'b
+    pub fn next<'c>(&'c mut self) -> Option<Record<'b, 'c>>
+        where 'b: 'c
     {
-        self.file_lines.next().map(Record::new)
+        let parser = &mut self.parser;
+        self.file_lines.next().map(move |cols| Record::new(parser, cols))
     }
 
     /// Create a record stream from raw contents
-    fn new(file_contents: &'a str) -> Self {
+    fn new(parser: &'a mut Parser, file_contents: &'b str) -> Self {
         Self {
+            parser,
             file_lines: SplitLinesBySpace::new(file_contents),
         }
     }
@@ -59,18 +81,21 @@ impl<'a> RecordStream<'a> {
 ///
 ///
 /// Record from /proc/diskstats (activity of one block device)
-pub struct Record<'a, 'b> where 'a: 'b {
+pub struct Record<'b, 'c> where 'b: 'c {
+    /// Parent parser struct
+    parser: &'c mut Parser,
+
     // Device numbers
     device_nums: DeviceNumbers,
 
     // Device name
-    device_str: &'a str,
+    device_str: &'b str,
 
     // Unparsed device statistics
-    stats_columns: SplitColumns<'a, 'b>,
+    stats_columns: SplitColumns<'b, 'c>,
 }
 //
-impl<'a, 'b> Record<'a, 'b> {
+impl<'b, 'c> Record<'b, 'c> {
     /// Query the device number
     fn device_numbers(&self) -> DeviceNumbers {
         self.device_nums
@@ -81,16 +106,25 @@ impl<'a, 'b> Record<'a, 'b> {
         self.device_str
     }
 
-    // TODO: Query the statistics
+    /// Parse and return the statistics
+    fn extract_statistics(self) -> Statistics {
+        // First, fetch the last observed counter values from this device. If
+        // none was observed, assume a last observed value of "all zeroes".
+        let last_counters = self.parser.previous_counter_vals
+                                       .entry(self.device_nums)
+                                       .or_insert([0u64; 10]);
+        Statistics::new(last_counters, self.stats_columns)
+    }
 
     /// Construct a record from associated file columns
-    fn new(mut columns: SplitColumns<'a, 'b>) -> Self {
+    fn new(parser: &'c mut Parser, mut columns: SplitColumns<'b, 'c>) -> Self {
         let major_num = columns.next().expect("Expected major device number")
                                .parse().expect("Could not parse major number");
         let minor_num = columns.next().expect("Expected minor device number")
                                .parse().expect("Could not parse minor number");
         let name = columns.next().expect("Expected device name");
         Self {
+            parser,
             device_nums: DeviceNumbers { major: major_num, minor: minor_num },
             device_str: name,
             stats_columns: columns,
@@ -185,15 +219,85 @@ struct Statistics {
 }
 //
 impl Statistics {
-    // TODO: Add one accessor per statistic
+    /// Parse device statistics, using knowledge of previous counter values for
+    /// the sake of relatively sane overflow handling.
+    fn new<'b, 'c>(last_counters: &'c mut [u64; 10],
+                   columns: SplitColumns<'b, 'c>) -> Self {
+        // All statistics should be integers of the machine's native word size
+        let mut counter_vals_iter = columns.map(|col_str| {
+            col_str.parse::<usize>().expect("Expected a native machine word")
+        });
 
-    /// Parse device statistics
-    fn new<'a, 'b>(mut columns: SplitColumns<'a, 'b>) -> Self {
-        // TODO: Parse the statistics. The raw data from the kernel is basically
-        //       a bunch of usizes, but there is some overflow analysis to be
-        //       done with respect to the previously observed result in order
-        //       to interprete correctly. Cache previous result in parser.
-        unimplemented!()
+        // Some statistics can overflow, and we try to handle it well
+        let unwrap_counter = |new_value: usize, last_counter: u64| -> u64 {
+            // Find what was the last counter value that we observed
+            let last_value = last_counter as usize;
+
+            // If the new counter value is greater than the old one, assume that
+            // no overflow occured and add the difference. Otherwise, assume
+            // that a single overflow has occured, and add usize::max_value()
+            // then substract the absolute difference. This computation can be
+            // conveniently expressed using a wrapping substraction.
+            last_counter + (new_value.wrapping_sub(last_value) as u64)
+        };
+
+        // But where do we get the last counter value, you may ask? Well, we get
+        // it from a Parser-provided cache that we will update at the end.
+        let mut last_counters_iter = last_counters.iter_mut();
+
+        // In a nutshell, for every "counter" field (i.e. anything but
+        // io_in_progress), we are going to do the following:
+        let mut process_counter = |counter_val: Option<usize>| -> u64 {
+            let new_counter_val =
+                counter_val.expect("Missing statistic in /proc/diskstats");
+            let last_completed_reads =
+                last_counters_iter.next().expect("Missing cache for counter");
+            let result = unwrap_counter(new_counter_val, *last_completed_reads);
+            *last_completed_reads = result;
+            result
+        };
+
+        // There are also counters of miliseconds out there, which we will
+        // translate into a Duration for type safety and easier consumption.
+        let process_duration_ms = |ms_counter: u64| -> Duration {
+            let nanosecs = ((ms_counter % 1000) * 1_000_000) as u32;
+            let whole_secs = ms_counter / 1000;
+            Duration::new(whole_secs, nanosecs)
+        };
+
+        // And now, we have everything we need to translate all the statistics
+        let completed_reads = process_counter(counter_vals_iter.next());
+        let merged_reads = process_counter(counter_vals_iter.next());
+        let sector_reads = process_counter(counter_vals_iter.next());
+        let total_read_time_ms = process_counter(counter_vals_iter.next());
+        let total_read_time = process_duration_ms(total_read_time_ms);
+        let completed_writes = process_counter(counter_vals_iter.next());
+        let merged_writes = process_counter(counter_vals_iter.next());
+        let sector_writes = process_counter(counter_vals_iter.next());
+        let total_write_time_ms = process_counter(counter_vals_iter.next());
+        let total_write_time = process_duration_ms(total_write_time_ms);
+        let io_in_progress =
+            counter_vals_iter.next()
+                             .expect("Missing statistic in /proc/diskstats");
+        let wall_clock_io_time_ms = process_counter(counter_vals_iter.next());
+        let wall_clock_io_time = process_duration_ms(wall_clock_io_time_ms);
+        let weighted_io_time_ms = process_counter(counter_vals_iter.next());
+        let weighted_io_time = process_duration_ms(weighted_io_time_ms);
+
+        // And at the end, we put them all in a struct
+        Self {
+            completed_reads,
+            merged_reads,
+            sector_reads,
+            total_read_time,
+            completed_writes,
+            merged_writes,
+            sector_writes,
+            total_write_time,
+            io_in_progress,
+            wall_clock_io_time,
+            weighted_io_time,
+        }
     }
 }
 
