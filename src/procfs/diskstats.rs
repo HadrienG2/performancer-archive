@@ -1,5 +1,6 @@
 ///! This module contains a sampling parser for /proc/diskstats
 
+use ::data::SampledData;
 use ::parser::PseudoFileParser;
 use ::procfs::version::LINUX_VERSION;
 use ::splitter::{SplitColumns, SplitLinesBySpace};
@@ -24,6 +25,11 @@ impl PseudoFileParser for Parser {
     /// perform quick schema validation, just to maximize the odds that failure,
     /// if any, will occur at initialization time rather than run time.
     fn new(initial_contents: &str) -> Self {
+        // We rely on the disk stats format that was introduced in Linux 2.6.25
+        assert!(LINUX_VERSION.greater_eq(2, 6, 25),
+            "Unsupported diskstats format, please use Linux >= 2.6.25");
+
+        // Check that we can parse all records without issues
         let mut parser = Self { previous_counter_vals: HashMap::new() };
         {
             let mut records = parser.parse(initial_contents);
@@ -302,16 +308,13 @@ impl Statistics {
 }
 
 
-// TODO: Rework storage as a dumb slave of the smart parser
-
-
 /// Data samples from /proc/diskstats, in structure-of-array layout
 ///
 /// TODO: Provide a more detailed description after implementation
 ///
-struct DiskStatsData {
+struct Data {
     /// List of iostat records following original file order (as in MemInfoData)
-    records: Vec<DiskStatsRecord>,
+    records: Vec<SampledStats>,
 
     /// Device numbers associated with each record, again in file order
     device_numbers: Vec<DeviceNumbers>,
@@ -320,74 +323,8 @@ struct DiskStatsData {
     device_names: Vec<String>,
 }
 //
-impl DiskStatsData {
-    /// Create a new disk stats data store, using a first sample to know the
-    /// structure of /proc/diskstats on this system
-    fn new(initial_contents: &str) -> Self {
-        // We only support the disktats format introduced by Linux 2.6.25, where
-        // detailed statistics are provided for both disks and partitions
-        assert!(LINUX_VERSION.greater_eq(2, 6, 25),
-                "Unsupported diskstats format, please use Linux >= 2.6.25");
-
-        // Our data store will eventually go there
-        let mut data = Self {
-            records: Vec::new(),
-            device_numbers: Vec::new(),
-            device_names: Vec::new(),
-        };
-
-        // For each line of the initial content of /proc/diskstats...
-        let mut lines = SplitLinesBySpace::new(initial_contents);
-        while let Some(mut columns) = lines.next() {
-            // Extract and memorize the device identifiers
-            {
-                let (numbers, name) = Self::parse_device_ids(&mut columns);
-                data.device_numbers.push(numbers);
-                data.device_names.push(name.to_owned());
-            }
-
-            // Build a record associated with this block device
-            data.records.push(DiskStatsRecord::new(columns));
-        }
-
-        // Return our data collection setup
-        data
-    }
-
-    /// Parse the contents of /proc/diskstats and add a data sample to all
-    /// corresponding entries in the internal data store
-    fn push(&mut self, file_contents: &str) {
-        // This time, we know how lines of /proc/diskstats should map to members
-        let mut lines = SplitLinesBySpace::new(file_contents);
-        for ((record, numbers), name) in self.records.iter_mut()
-                                             .zip(self.device_numbers.iter())
-                                             .zip(self.device_names.iter()) {
-            // Iterate over lines, checking that each device record which we
-            // observed during initialization is still around (otherwise, an
-            // unsupported hotplug event has occurred).
-            let mut columns = lines.next()
-                                   .expect("A device record has disappeared");
-
-            // Extract and check the device identifiers
-            // (If they don't match, an unsupported hotplug event occurred)
-            {
-                let (numbers2, name2) = Self::parse_device_ids(&mut columns);
-                assert_eq!(*numbers, numbers2, "Device numbers do not match");
-                assert_eq!(name,     name2,    "Device name does not match");
-            }
-
-            // Forward the data to the record associated with this device
-            record.push(columns);
-        }
-
-        // In debug mode, we also check that records did not appear out of blue
-        debug_assert_eq!(lines.next(), None,
-                         "A device record appeared out of nowhere");
-    }
-
-    /// Tell how many samples are present in the data store, and in debug mode
-    /// check for internal data store consistency
-    #[cfg(test)]
+impl SampledData for Data {
+    /// Tell how many samples are present in the data store + check consistency
     fn len(&self) -> usize {
         // We'll return the length of the first record, if any, or else zero
         let length = self.records.first().map_or(0, |rec| rec.len());
@@ -400,29 +337,59 @@ impl DiskStatsData {
     }
 }
 //
-impl DiskStatsData {
-    /// Parse the major/minor device numbers and the device name from the
-    /// beginning of a record of /proc/diskstats
-    fn parse_device_ids<'a>(columns: &'a mut SplitColumns) -> (DeviceNumbers,
-                                                               &'a str) {
-        // Extract the major device number
-        let major = columns.next()
-                           .expect("Major device number is missing")
-                           .parse::<u32>()
-                           .expect("Failed to parse major device number");
+// TODO: Implement SampledData2 once that is usable in stable Rust
+impl Data {
+    /// Create a new disk stats data store, using a first sample to know the
+    /// structure of /proc/diskstats on this system
+    fn new(mut stream: RecordStream) -> Self {
+        // Our data store will eventually go there
+        let mut data = Self {
+            records: Vec::new(),
+            device_numbers: Vec::new(),
+            device_names: Vec::new(),
+        };
 
-        // Extract the minor device number
-        let minor = columns.next()
-                           .expect("Minor device number is missing")
-                           .parse::<u32>()
-                           .expect("Failed to parse minor device number");
+        // For each initial record of /proc/diskstats...
+        while let Some(record) = stream.next() {
+            // Extract and memorize the device identifiers
+            data.device_numbers.push(record.device_numbers());
+            data.device_names.push(record.device_name().to_owned());
 
-        // Extract the device name
-        let name = columns.next()
-                          .expect("Device name is missing");
+            // Build a record associated with this block device
+            data.records.push(SampledStats::new(record.extract_statistics()));
+        }
 
-        // Return all these informations
-        (DeviceNumbers { major, minor }, name)
+        // Return our data collection setup
+        data
+    }
+
+    /// Parse the contents of /proc/diskstats and add a data sample to all
+    /// corresponding entries in the internal data store
+    fn push(&mut self, mut stream: RecordStream) {
+        // This time, we know how lines of /proc/diskstats should map to members
+        for ((samples, numbers), name) in self.records.iter_mut()
+                                              .zip(self.device_numbers.iter())
+                                              .zip(self.device_names.iter()) {
+            // Make sure that each device record which we observed during
+            // initialization is still around (otherwise, an hotplug event has
+            // occurred, and that is currently unsupported).
+            let record = stream.next()
+                               .expect("A device record has disappeared");
+
+            // Extract and check the device identifiers
+            // (If they don't match, an unsupported hotplug event occurred)
+            assert_eq!(*numbers, record.device_numbers(),
+                       "Device numbers do not match");
+            assert_eq!(name, record.device_name(),
+                       "Device name does not match");
+
+            // Forward the data to the record associated with this device
+            samples.push(record.extract_statistics());
+        }
+
+        // In debug mode, we also check that records did not appear out of blue
+        debug_assert!(stream.next().is_none(),
+                      "A device record appeared out of nowhere");
     }
 }
 
@@ -431,7 +398,7 @@ impl DiskStatsData {
 /// TODO: Decide whether code sharing with the interrupt sampler is worthwhile
 /// TODO: This parser can also be used when parsing /sys/block/<device>/stat.
 ///       Do we want to implement support for that and make code reuse easy?
-enum DiskStatsRecord {
+enum SampledStats {
     /// If we've only ever seen zeroes, we only count the number of zeroes
     Zeroes(usize),
 
@@ -509,21 +476,20 @@ enum DiskStatsRecord {
     },
 }
 //
-impl DiskStatsRecord {
+impl SampledStats {
     /// Create a new record
-    fn new(mut raw_data: SplitColumns) -> Self {
+    fn new(stats: Statistics) -> Self {
         // TODO
         unimplemented!()
     }
 
     /// Push new data inside of the record
-    fn push(&mut self, mut raw_data: SplitColumns) {
+    fn push(&mut self, stats: Statistics) {
         // TODO
         unimplemented!()
     }
 
     /// Tell how many samples are present in the data store
-    #[cfg(test)]
     fn len(&self) -> usize {
         // TODO
         unimplemented!()
