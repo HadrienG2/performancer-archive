@@ -1,3 +1,6 @@
+**IMPORTANT NOTE: This project has been discontinued, and is provided on GitHub
+for archival and educational purposes only**
+
 # Performance analysis interface to procfs (and later sysfs)
 
 When measuring system and application performance on Linux, a lot can be learned
